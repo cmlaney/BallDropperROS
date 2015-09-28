@@ -56,6 +56,61 @@ uint16_t transmitPacket( const uint8_t* data, uint8_t dataLength, Serial* serial
 uint16_t transmitStringPacket( const char* str, Serial* serial );
 
 /*
+ * @brief Packs a uint16_t into a byte buffer in network order.
+ * @param data the buffer to write into
+ * @param offset offset into the buffer to write
+ * @param val the value to write
+ */
+inline void writeUint16(uint8_t* data, int offset, uint16_t val)
+{
+    data[offset] = 0xff & (val >> 8);
+    data[offset + 1] = 0xff & val;
+}
+
+/*
+ * @brief Packs a uint32_t into a byte buffer in network order.
+ * @param data the buffer to write into
+ * @param offset offset into the buffer to write
+ * @param val the value to write
+ */
+inline void writeUint32(uint8_t* data, int offset, uint32_t val)
+{
+    data[offset] = 0xff & (val >> 24);
+    data[offset + 1] = 0xff & (val >> 16);
+    data[offset + 2] = 0xff & (val >> 8);
+    data[offset + 3] = 0xff & val;
+}
+
+/*
+ * @brief Reads a network-order uint16_t from a byte buffer
+ * @param data the buffer to read from
+ * @param offset offset into the buffer to read
+ * @returns the read value
+ */
+inline uint16_t readUint16(uint8_t* data, int offset){
+    uint16_t ret;
+    ret = data[offset];
+    ret = (ret << 8) + data[offset + 1];
+    return ret;
+}
+
+/*
+ * @brief Reads a network-order uint32_t from a byte buffer
+ * @param data the buffer to read from
+ * @param offset offset into the buffer to read
+ * @returns the read value
+ */
+inline uint32_t readUint32(uint8_t* data, int offset)
+{
+    uint32_t ret;
+    ret = data[offset];
+    ret = (ret << 8) + data[offset + 1];
+    ret = (ret << 8) + data[offset + 2];
+    ret = (ret << 8) + data[offset + 3];
+    return ret;
+}
+
+/*
  * @brief Determines if a packet is an acknowledgement packet or a data packet
  * @param packet the packet to check
  * @return 1 if the packet is an Acknowledgement. 0 if the packet is a data packet

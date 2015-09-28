@@ -68,7 +68,7 @@ Packet* checkForPacketDontAck( Serial* serial )
     dataAvailable = receiveByte(&readByte, serial);
     if (dataAvailable)
     {
-        printf("%c%c ", hexToAscii[readByte >> 4], hexToAscii[readByte & 0x0F]);
+        //printf("%c%c ", hexToAscii[readByte >> 4], hexToAscii[readByte & 0x0F]);
         fflush(stdout);
         //Check if we aren't in the middle of a packet
         if (readBytesLength == 0 )

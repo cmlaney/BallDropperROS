@@ -12,7 +12,9 @@
 #include "geometry_msgs/Twist.h"
 #include "std_msgs/String.h"
 #include "std_msgs/UInt8.h"
+#include "ball_dropper_msgs/Heartbeat.h"
 #include "rdt.hpp"
+#include "boost/date_time/posix_time/posix_time.hpp"
 
 std::auto_ptr<Serial> serialPort;
 
@@ -27,6 +29,157 @@ void consoleCallback(const std_msgs::String& msg)
     }
 }
 
+
+
+boost::posix_time::ptime timestampOfLastStateMessage(boost::posix_time::min_date_time);
+uint8_t opCode;
+uint8_t remainingInjections = 0;
+bool calibrated = false;
+bool hatchOpen = false;
+bool hatchClosed = false;
+bool wheelInPosition = false;
+bool driverForward = false;
+bool driverBack = false;
+bool hatchFailure = false;
+bool wheelFailure = false;
+bool driverFailure = false;
+bool injectorFailure = false;
+uint32_t actionStartTime;
+uint32_t actionDuration;
+uint32_t counterStartVal;
+uint32_t counterEndVal;
+uint16_t lowestCurrent;
+uint16_t highestCurrent;
+uint32_t totalCurrent;
+
+ros::Publisher heartbeatPub;
+void publishHeartbeatMsg()
+{
+    ball_dropper_msgs::Heartbeat heartbeatMsg;
+
+    heartbeatMsg.currentOpCode = opCode;
+    heartbeatMsg.opCodeOfLastAction = opCode;
+    heartbeatMsg.calibrated = calibrated ? 1 : 0;
+    heartbeatMsg.hatchOpen = hatchOpen ? 1 : 0;
+    heartbeatMsg.hatchClosed = hatchClosed ? 1 : 0;
+    heartbeatMsg.wheelInPosition = wheelInPosition ? 1 : 0;
+    heartbeatMsg.driverForward = driverForward? 1 : 0;
+    heartbeatMsg.driverBack = driverBack ? 1 : 0;
+    heartbeatMsg.hatchFailure = hatchFailure ? 1 : 0;
+    heartbeatMsg.wheelFailure = wheelFailure ? 1 : 0;
+    heartbeatMsg.driverFailure = driverFailure ? 1 : 0;
+    heartbeatMsg.injectorFailure = injectorFailure ? 1 : 0;
+    heartbeatMsg.actionStartTime = actionStartTime;
+    heartbeatMsg.actionDuration = actionDuration;
+    heartbeatMsg.counterStartVal = counterStartVal;
+    heartbeatMsg.counterEndVal = counterEndVal;
+    heartbeatMsg.lowestCurrent = lowestCurrent;
+    heartbeatMsg.highestCurrent = highestCurrent;
+    heartbeatMsg.totalCurrent = totalCurrent;
+
+    heartbeatPub.publish(heartbeatMsg);
+}
+
+void printStatus()
+{
+    printf("\nOp Code: %u\n", opCode);
+    printf("Remaining Injections: %d\n", remainingInjections);
+    calibrated ? printf("Calibrated\n") : printf("Uncalibrated\n");
+    if (hatchOpen) {
+        printf("Hatch Open\n");
+    } else if (hatchClosed) {
+        printf("Hatch Closed\n");
+    } else {
+        printf("Hatch neither Open nor Closed!\n");
+    }
+
+    wheelInPosition ? printf("Wheel in Position\n") : printf("Wheel not in Position!\n");
+
+    if (driverForward) {
+        printf("Driver Forward\n");
+    } else if (driverBack) {
+        printf("Driver Back\n");
+    } else {
+        printf("Driver neither Forward nor Back!\n");
+    }
+
+    if (hatchFailure) {
+        printf("Hatch Failure!\n");
+    }
+    if (wheelFailure) {
+        printf("Wheel Failure!\n");
+    }
+    if (driverFailure) {
+        printf("Driver Failure!\n");
+    }
+    if (injectorFailure) {
+        printf("Injector Failure!\n");
+    }
+    printf("Action Start Time: %u\n", actionStartTime);
+    printf("Action Duration: %u\n", actionDuration);
+    printf("Counter Start Val: %u\n", counterStartVal);
+    printf("Counter End Val: %u\n", counterEndVal);
+    printf("Lowest Current: %u\n", lowestCurrent);
+    printf("Highest Current: %u\n", highestCurrent);
+    printf("Total Current: %u\n", totalCurrent);
+}
+/*
+ * @brief Dissects a status packet received from the ball dropper over the serial comms.
+ */
+void parseHeartbeatPacket(uint8_t* data)
+{
+    int offset = 0;
+    uint8_t flags;
+
+    timestampOfLastStateMessage = boost::posix_time::microsec_clock::local_time();
+
+    opCode = data[offset];
+    ++offset;
+
+    remainingInjections = data[offset];
+    ++offset;
+
+    flags = data[offset];
+    calibrated = flags & 0x01 ? true: false;
+    hatchOpen  = flags & 0x02 ? true: false;
+    hatchClosed = flags & 0x04 ? true: false;
+    wheelInPosition = flags & 0x08 ? true: false;
+    driverForward = flags & 0x10 ? true: false;
+    driverBack = flags & 0x20 ? true: false;
+    ++offset;
+
+    flags = data[offset];
+    hatchFailure = flags & 0x01 ? true: false;
+    wheelFailure = flags & 0x02 ? true: false;
+    driverFailure = flags & 0x04 ? true: false;
+    injectorFailure = flags & 0x08 ? true: false;
+    ++offset;
+
+    actionStartTime = readUint32(data,offset);
+    offset+=4;
+
+    actionDuration = readUint32(data,offset);
+    offset+=4;
+
+    counterStartVal = readUint32(data,offset);
+    offset+=4;
+
+    counterEndVal = readUint32(data,offset);
+    offset+=4;
+
+    lowestCurrent = readUint16(data,offset);
+    offset+=2;
+
+    highestCurrent = readUint16(data,offset);
+    offset+=2;
+
+    totalCurrent = readUint32(data,offset);
+    offset+=4;
+
+    publishHeartbeatMsg();
+    return;
+}
+
 //Main
 int main(int argc, char **argv)
 {
@@ -36,6 +189,7 @@ int main(int argc, char **argv)
 
     serialPort.reset(new Serial("/dev/ttyUSB0", 9600));
 
+    heartbeatPub = n.advertise<ball_dropper_msgs::Heartbeat>("heartbeat", 100);
     ros::Subscriber consoleSub = n.subscribe("ballDropperMsg", 10, consoleCallback);
 
     Packet* receivedPkt;
@@ -52,6 +206,11 @@ int main(int argc, char **argv)
                 {
                     printf("String Packet Received: %s\n", receivedPkt->data);
                 }
+                else if (receivedPkt->dataLength == 29)
+                {
+                    //Heartbeat packet
+                    parseHeartbeatPacket(receivedPkt->data);
+                }
                 else
                 {
                     printf("Data Packet Received\n");
@@ -61,11 +220,11 @@ int main(int argc, char **argv)
             {
                 if (receivedPkt->crc16 == ackCrc)
                 {
-                    printf("Ack Received\n");
+                    //printf("Ack Received\n");
                 }
                 else
                 {
-                    printf("Unknown Ack Received\n");
+                    //printf("Unknown Ack Received\n");
                 }
 
             }
@@ -73,7 +232,6 @@ int main(int argc, char **argv)
         ros::spinOnce();
         //serialPort->writeByte(0xEF);
     }
-
 
     return 0;
 }
