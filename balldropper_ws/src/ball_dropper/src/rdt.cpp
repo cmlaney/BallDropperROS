@@ -84,7 +84,7 @@ Packet* checkForPacketDontAck( Serial* serial )
             else
             {
                 //Unexpected start byte. Throw it away
-                printf("Unexpected Start Byte: %d\n", readByte);
+                //printf("Unexpected Start Byte: %d\n", readByte);
                 return NULL;
             }
         }
@@ -141,11 +141,11 @@ Packet* checkForPacketDontAck( Serial* serial )
                 //Invalid Checksum. Throw away the packet
                 if (readBytes[1] > 0)
                 {
-                    printf("Invalid Checksum over [%s]", &readBytes[2]);
+                    //printf("Invalid Checksum over [%s]", &readBytes[2]);
                 }
                 else
                 {
-                    printf("Invalid Checksum\n");
+                    //printf("Invalid Checksum\n");
                 }
 
                 return NULL;

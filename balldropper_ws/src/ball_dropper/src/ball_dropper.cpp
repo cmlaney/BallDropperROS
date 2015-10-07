@@ -29,17 +29,20 @@ void consoleCallback(const std_msgs::String& msg)
     }
 }
 
-
-
-boost::posix_time::ptime timestampOfLastStateMessage(boost::posix_time::min_date_time);
+ros::Time timestamp;
 uint8_t opCode;
+uint8_t opCodeOfLastAction;
 uint8_t remainingInjections = 0;
 bool calibrated = false;
 bool hatchOpen = false;
-bool hatchClosed = false;
 bool wheelInPosition = false;
 bool driverForward = false;
 bool driverBack = false;
+bool fireDanger = false;
+bool criticalFireDanger = false;
+bool rotateMotorOn = false;
+bool driveMotorOn = false;
+bool injectMotorOn = false;
 bool hatchFailure = false;
 bool wheelFailure = false;
 bool driverFailure = false;
@@ -48,6 +51,7 @@ uint32_t actionStartTime;
 uint32_t actionDuration;
 uint32_t counterStartVal;
 uint32_t counterEndVal;
+uint16_t instantaneousCurrent;
 uint16_t lowestCurrent;
 uint16_t highestCurrent;
 uint32_t totalCurrent;
@@ -57,22 +61,30 @@ void publishHeartbeatMsg()
 {
     ball_dropper_msgs::Heartbeat heartbeatMsg;
 
+    heartbeatMsg.header.stamp = timestamp;
+
     heartbeatMsg.currentOpCode = opCode;
-    heartbeatMsg.opCodeOfLastAction = opCode;
+    heartbeatMsg.opCodeOfLastAction = opCodeOfLastAction;
+    heartbeatMsg.remainingInjections = remainingInjections;
     heartbeatMsg.calibrated = calibrated ? 1 : 0;
     heartbeatMsg.hatchOpen = hatchOpen ? 1 : 0;
-    heartbeatMsg.hatchClosed = hatchClosed ? 1 : 0;
     heartbeatMsg.wheelInPosition = wheelInPosition ? 1 : 0;
     heartbeatMsg.driverForward = driverForward? 1 : 0;
     heartbeatMsg.driverBack = driverBack ? 1 : 0;
+    heartbeatMsg.fireDanger = fireDanger ? 1 : 0;
+    heartbeatMsg.criticalFireDanger = criticalFireDanger ? 1 : 0;
     heartbeatMsg.hatchFailure = hatchFailure ? 1 : 0;
     heartbeatMsg.wheelFailure = wheelFailure ? 1 : 0;
     heartbeatMsg.driverFailure = driverFailure ? 1 : 0;
     heartbeatMsg.injectorFailure = injectorFailure ? 1 : 0;
+    heartbeatMsg.rotateMotorOn = rotateMotorOn ? 1 : 0;
+    heartbeatMsg.driveMotorOn = driveMotorOn ? 1 : 0;
+    heartbeatMsg.injectMotorOn = injectMotorOn ? 1 : 0;
     heartbeatMsg.actionStartTime = actionStartTime;
     heartbeatMsg.actionDuration = actionDuration;
     heartbeatMsg.counterStartVal = counterStartVal;
     heartbeatMsg.counterEndVal = counterEndVal;
+    heartbeatMsg.instantaneousCurrent = instantaneousCurrent;
     heartbeatMsg.lowestCurrent = lowestCurrent;
     heartbeatMsg.highestCurrent = highestCurrent;
     heartbeatMsg.totalCurrent = totalCurrent;
@@ -83,14 +95,13 @@ void publishHeartbeatMsg()
 void printStatus()
 {
     printf("\nOp Code: %u\n", opCode);
+    printf("\nOp Code of Last Action: %u\n", opCode);
     printf("Remaining Injections: %d\n", remainingInjections);
     calibrated ? printf("Calibrated\n") : printf("Uncalibrated\n");
     if (hatchOpen) {
         printf("Hatch Open\n");
-    } else if (hatchClosed) {
-        printf("Hatch Closed\n");
     } else {
-        printf("Hatch neither Open nor Closed!\n");
+        printf("Hatch Closed\n");
     }
 
     wheelInPosition ? printf("Wheel in Position\n") : printf("Wheel not in Position!\n");
@@ -101,6 +112,15 @@ void printStatus()
         printf("Driver Back\n");
     } else {
         printf("Driver neither Forward nor Back!\n");
+    }
+
+    if (criticalFireDanger)
+    {
+        printf("System failure during injection! Critical Fire Danger!\n");
+    }
+    else if (fireDanger)
+    {
+        printf("Ball is going to be on fire.\n");
     }
 
     if (hatchFailure) {
@@ -131,28 +151,35 @@ void parseHeartbeatPacket(uint8_t* data)
     int offset = 0;
     uint8_t flags;
 
-    timestampOfLastStateMessage = boost::posix_time::microsec_clock::local_time();
+    timestamp = ros::Time::now();
 
     opCode = data[offset];
+    ++offset;
+
+    opCodeOfLastAction = data[offset];
     ++offset;
 
     remainingInjections = data[offset];
     ++offset;
 
     flags = data[offset];
-    calibrated = flags & 0x01 ? true: false;
-    hatchOpen  = flags & 0x02 ? true: false;
-    hatchClosed = flags & 0x04 ? true: false;
-    wheelInPosition = flags & 0x08 ? true: false;
-    driverForward = flags & 0x10 ? true: false;
-    driverBack = flags & 0x20 ? true: false;
+    calibrated = flags & 0x01 ? true : false;
+    hatchOpen  = flags & 0x02 ? true : false;
+    wheelInPosition = flags & 0x04 ? true : false;
+    driverForward = flags & 0x08 ? true : false;
+    driverBack = flags & 0x10 ? true : false;
+    fireDanger = flags & 0x20 ? true : false;
+    criticalFireDanger = flags & 0x40 ? true : false;
     ++offset;
 
     flags = data[offset];
-    hatchFailure = flags & 0x01 ? true: false;
-    wheelFailure = flags & 0x02 ? true: false;
-    driverFailure = flags & 0x04 ? true: false;
-    injectorFailure = flags & 0x08 ? true: false;
+    hatchFailure = flags & 0x01 ? true : false;
+    wheelFailure = flags & 0x02 ? true : false;
+    driverFailure = flags & 0x04 ? true : false;
+    injectorFailure = flags & 0x08 ? true : false;
+    rotateMotorOn = flags & 0x10 ? true : false;
+    driveMotorOn = flags & 0x20 ? true : false;
+    injectMotorOn = flags & 0x40 ? true : false;
     ++offset;
 
     actionStartTime = readUint32(data,offset);
@@ -166,6 +193,9 @@ void parseHeartbeatPacket(uint8_t* data)
 
     counterEndVal = readUint32(data,offset);
     offset+=4;
+
+    instantaneousCurrent = readUint16(data,offset);
+    offset+=2;
 
     lowestCurrent = readUint16(data,offset);
     offset+=2;
@@ -206,7 +236,7 @@ int main(int argc, char **argv)
                 {
                     printf("String Packet Received: %s\n", receivedPkt->data);
                 }
-                else if (receivedPkt->dataLength == 29)
+                else if (receivedPkt->dataLength == 32)
                 {
                     //Heartbeat packet
                     parseHeartbeatPacket(receivedPkt->data);
