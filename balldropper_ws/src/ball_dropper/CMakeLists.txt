@@ -20,6 +20,10 @@ find_package(catkin REQUIRED COMPONENTS
 #   Message2.msg
 # )
 
+add_service_files(
+  FILES
+  Operation.srv
+)
 
 ## Generate added messages and services with any dependencies listed here
  generate_messages(

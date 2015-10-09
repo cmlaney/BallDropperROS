@@ -13,21 +13,27 @@
 #include "std_msgs/String.h"
 #include "std_msgs/UInt8.h"
 #include "ball_dropper_msgs/Heartbeat.h"
+#include "ball_dropper/Operation.h"
 #include "rdt.hpp"
 #include "boost/date_time/posix_time/posix_time.hpp"
+#include "boost/thread.hpp"
+#include "boost/interprocess/sync/scoped_lock.hpp"
+
+#define OP_IDLE 0
+#define OP_OPEN_HATCH 1
+#define OP_CLOSE_HATCH 2
+#define OP_ROTATE 3
+#define OP_DRIVE_ON 4
+#define OP_DRIVE_OFF 5
+#define OP_INJECT 6
+#define OP_RELOAD 7
+#define OP_FLUSH 8
+#define OP_CALIBRATE 100
+#define OP_GET_ERROR_STRING 101
+#define OP_CLEAR_ERRORS 102
+#define OP_EMG_STOP 255
 
 std::auto_ptr<Serial> serialPort;
-
-uint16_t ackCrc = 0;
-
-//Transmit any string recieved to the ball dropper
-void consoleCallback(const std_msgs::String& msg)
-{
-    if ( msg.data.length() < 255 )
-    {
-        ackCrc = transmitStringPacket(msg.data.c_str(), serialPort.get());
-    }
-}
 
 ros::Time timestamp;
 uint8_t opCode;
@@ -143,6 +149,7 @@ void printStatus()
     printf("Highest Current: %u\n", highestCurrent);
     printf("Total Current: %u\n", totalCurrent);
 }
+
 /*
  * @brief Dissects a status packet received from the ball dropper over the serial comms.
  */
@@ -210,6 +217,168 @@ void parseHeartbeatPacket(uint8_t* data)
     return;
 }
 
+
+//Transmit any string recieved to the ball dropper
+void consoleCallback(const std_msgs::String& msg)
+{
+    if ( msg.data.length() < 255 )
+    {
+        transmitStringPacket(msg.data.c_str(), serialPort.get());
+    }
+}
+
+uint16_t ackCrc = 0;
+bool acked = false;
+bool expectingErrorString = false;
+char errorString[256];
+boost::mutex operationMtx;
+
+/*
+ * Commands the ball dropper to perform the requested operation
+ */
+bool operation(ball_dropper::Operation::Request &req,
+                ball_dropper::Operation::Response &res)
+{
+    //Lock the mutex so that we don't try concurrent operations
+    //Will be unlocked when the function returns and this object is destroyed
+    boost::interprocess::scoped_lock<boost::mutex> slock(operationMtx);
+
+    //Get the previous operation code and its start time
+    uint8_t previousOpCode = opCodeOfLastAction;
+    uint32_t previousActionStartTime = actionStartTime;
+
+    //Are we looking for an error string?
+    if (req.opCode == OP_GET_ERROR_STRING)
+    {
+        errorString[0] = '\0';
+        expectingErrorString = true;
+    }
+
+    bool success = false;
+    //For each available attempt
+    for (int attemptCount = 0; attemptCount < 3; ++attemptCount)
+    {
+        //Transmit the packet
+        ackCrc = transmitPacket(&(req.opCode), 1, serialPort.get());
+        acked = false;
+
+        //Wait for timeout, acknowledgement, or infer communication success from the heartbeat
+        ros::Time startWaitTime = ros::Time::now();
+        ros::Duration waitTime;
+        while (waitTime = ros::Time::now() - startWaitTime, waitTime.toSec() < 0.75)
+        {
+            if (acked) {
+                success = true;
+                break;
+            }
+            if (previousActionStartTime != actionStartTime && opCodeOfLastAction == req.opCode)
+            {
+                success = true;
+                break;
+            }
+        }
+        //Did we succeed? 
+        if (success)
+        {
+            //Don't retry
+            break;
+        }
+    }
+    //Did we get a response?
+    if (success)
+    {
+        //Were we looking for an error string?
+        if (req.opCode == OP_GET_ERROR_STRING)
+        {
+            //Wait for the error string packet to arrive
+            ros::Time startWaitTime = ros::Time::now();
+            ros::Duration waitTime;
+            while (expectingErrorString)
+            {
+                waitTime = ros::Time::now() - startWaitTime;
+                if (waitTime.toSec() > 1.0)
+                {
+                    break;
+                }
+            }
+            //Did we receive it?
+            if (expectingErrorString)
+            {
+                //Successfully transmitted the operation command, but didn't get the error string packet back
+                res.errorMessage = "Communication Failure";
+            }
+            else
+            {
+                //Successfully transmitted the operation command, and got the error string packet back
+                res.errorMessage = std::string(errorString);
+            }
+        } else {
+            //Successfully transmitted the operation command
+            res.errorMessage = "";
+        }
+    }
+    else
+    {
+        //Unsuccessfully transmitted the operation command
+        res.errorMessage = "Communication Failure";
+    }
+    //Return
+    expectingErrorString = false;
+    acked = true;
+    return true;
+}
+
+void listenerThread(void)
+{
+    Packet* receivedPkt;
+
+    //Run until interrupted
+    ros::Rate r(60);
+    while (ros::ok())
+    {
+        receivedPkt = checkForPacket(serialPort.get());
+        if (receivedPkt != NULL)
+        {
+            if ( !isAck(receivedPkt) )
+            {
+                //Is this a string packet?
+                if (receivedPkt->data[receivedPkt->dataLength - 1] == '\0')
+                {
+                    printf("String Packet Received: %s\n", receivedPkt->data);
+                    //Are we looking for an error string packet?
+                    if (expectingErrorString)
+                    {
+                        strcpy(errorString, (char*)receivedPkt->data);
+                        acked = true;
+                        expectingErrorString = false;
+                    }
+                }
+                //Is this a heartbeat packet?
+                else if (receivedPkt->dataLength == 32)
+                {
+                    //Heartbeat packet
+                    parseHeartbeatPacket(receivedPkt->data);
+                }
+                //This must be some unrecognized binary data packet.
+                else
+                {
+                    printf("Data Packet Received\n");
+                }
+            }
+            else
+            {
+                printf("Ack %u received\n", receivedPkt->crc16 );
+                //Is this ack acking a packet we sent?
+                if (!acked && isAcking(ackCrc, receivedPkt))
+                {
+                    acked = true;
+                }
+            }
+        }
+        r.sleep();
+    }
+}
+
 //Main
 int main(int argc, char **argv)
 {
@@ -221,47 +390,16 @@ int main(int argc, char **argv)
 
     heartbeatPub = n.advertise<ball_dropper_msgs::Heartbeat>("heartbeat", 100);
     ros::Subscriber consoleSub = n.subscribe("ballDropperMsg", 10, consoleCallback);
+    ros::ServiceServer operationService = n.advertiseService("operation", operation);
 
-    Packet* receivedPkt;
+    std::auto_ptr<boost::thread> pListenerThread;
+    //Create a new thread to listen on the serial port.
+    pListenerThread.reset( new  boost::thread(listenerThread));
 
-    //Run until interrupted
-    while (ros::ok())
-    {
-        receivedPkt = checkForPacket(serialPort.get());
-        if (receivedPkt != NULL)
-        {
-            if (receivedPkt->dataLength > 0 )
-            {
-                if (receivedPkt->data[receivedPkt->dataLength - 1] == '\0')
-                {
-                    printf("String Packet Received: %s\n", receivedPkt->data);
-                }
-                else if (receivedPkt->dataLength == 32)
-                {
-                    //Heartbeat packet
-                    parseHeartbeatPacket(receivedPkt->data);
-                }
-                else
-                {
-                    printf("Data Packet Received\n");
-                }
-            }
-            else
-            {
-                if (receivedPkt->crc16 == ackCrc)
-                {
-                    //printf("Ack Received\n");
-                }
-                else
-                {
-                    //printf("Unknown Ack Received\n");
-                }
+    //Handle subscriber and service server callbacks in this thread
+    ros::spin(); 
 
-            }
-        }
-        ros::spinOnce();
-        //serialPort->writeByte(0xEF);
-    }
+    pListenerThread->join();
 
     return 0;
 }
