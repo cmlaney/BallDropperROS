@@ -153,7 +153,7 @@ void printStatus()
 /*
  * @brief Dissects a status packet received from the ball dropper over the serial comms.
  */
-void parseHeartbeatPacket(uint8_t* data)
+void parseHeartbeatPacket(const uint8_t* data)
 {
     int offset = 0;
     uint8_t flags;
@@ -227,7 +227,7 @@ void consoleCallback(const std_msgs::String& msg)
     }
 }
 
-uint16_t ackCrc = 0;
+const Packet* transmittedPacket = NULL;
 bool acked = false;
 bool expectingErrorString = false;
 char errorString[256];
@@ -259,8 +259,18 @@ bool operation(ball_dropper::Operation::Request &req,
     for (int attemptCount = 0; attemptCount < 3; ++attemptCount)
     {
         //Transmit the packet
-        ackCrc = transmitPacket(&(req.opCode), 1, serialPort.get());
+        if (attemptCount == 0)
+        {
+            transmittedPacket = transmitPacket(&(req.opCode), 1, serialPort.get());
+        }
+        else
+        {
+            transmittedPacket = retryTransmission(serialPort.get());
+        }
+        
         acked = false;
+
+        printf("Transmitted SeqID: %u, CRC16: %u\n", transmittedPacket->sequenceId, transmittedPacket->crc16);
 
         //Wait for timeout, acknowledgement, or infer communication success from the heartbeat
         ros::Time startWaitTime = ros::Time::now();
@@ -357,6 +367,7 @@ void listenerThread(void)
                 else if (receivedPkt->dataLength == 32)
                 {
                     //Heartbeat packet
+                    printf("Heartbeat Packet Received\n");
                     parseHeartbeatPacket(receivedPkt->data);
                 }
                 //This must be some unrecognized binary data packet.
@@ -367,9 +378,9 @@ void listenerThread(void)
             }
             else
             {
-                printf("Ack %u received\n", receivedPkt->crc16 );
+                printf("Ack SeqID: %u, CRC16: %u received\n", receivedPkt->sequenceId, receivedPkt->crc16 );
                 //Is this ack acking a packet we sent?
-                if (!acked && isAcking(ackCrc, receivedPkt))
+                if (!acked && transmittedPacket != NULL && isAcking(transmittedPacket, receivedPkt))
                 {
                     acked = true;
                 }

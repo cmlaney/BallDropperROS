@@ -18,13 +18,15 @@
 typedef struct packet_
 {
     uint8_t dataLength;
-    uint8_t* data;
+    uint8_t sequenceId;
+    const uint8_t* data;
     uint16_t crc16;
 } Packet;
 
 /*
  * @brief Non-blocking function to receive data packets over serial.
- * May return Acknowledgement packets, which have 0 data length, and the crc is the crc of the acknowledged packet.
+ * May return Acknowledgement packets, which have 0 data length, and the crc is the
+ * crc of the acknowledged packet.
  * Automatically sends Acknowledgement packets in response to non-ack packets.
  * 
  * @return The next packet that has been received, or NULL if no packet ready.
@@ -33,7 +35,8 @@ Packet* checkForPacket(Serial* serial);
 
 /*
  * @brief Non-blocking function to receive data packets over serial.
- * May return Acknowledgement packets, which have 0 data length, and the crc is the crc of the acknowledged packet.
+ * May return Acknowledgement packets, which have 0 data length, and the crc is the
+ * crc of the acknowledged packet.
  * Does not send acknowledgement packets
  * 
  * @return The next packet that has been received, or NULL if no packet ready.
@@ -41,19 +44,29 @@ Packet* checkForPacket(Serial* serial);
 //Packet* checkForPacketDontAck(Serial* serial);
 
 /*
+ * @brief Retries transmission of the previous packet.
+ * Duplicate retransmissions will be ignored by the receiver.
+ * @return A datastructure of the transmitted packet, to be used when checking if
+ * the packet was acknowledged. Null if error.
+ */
+const Packet* retryTransmission(Serial* serial);
+
+/*
  * @brief Transmits a data packet over the serial connection
  * @param data a pointer to a byte buffer containing the data to be transmitted
  * @param dataLength the length of the data to transmit
- * @return the 16 bit crc of the data, to be used when checking if the packet was acknowledged.
+ * @return A datastructure of the transmitted packet, to be used when checking if
+ * the packet was acknowledged. Null if error.
  */
-uint16_t transmitPacket( const uint8_t* data, uint8_t dataLength, Serial* serial );
+const Packet* transmitPacket( const uint8_t* data, uint8_t dataLength, Serial* serial );
 
 /*
  * @brief Transmits a packet containing a string over the serial connection
  * @param str A nul-terminated string to transmit.
- * @return the 16 bit crc of the data, to be used when checking if the packet was acknowledged.
+ * @return A datastructure of the transmitted packet, to be used when checking if
+ * the packet was acknowledged. Null if error.
  */
-uint16_t transmitStringPacket( const char* str, Serial* serial );
+const Packet* transmitStringPacket( const char* str, Serial* serial );
 
 /*
  * @brief Packs a uint16_t into a byte buffer in network order.
@@ -87,7 +100,7 @@ inline void writeUint32(uint8_t* data, int offset, uint32_t val)
  * @param offset offset into the buffer to read
  * @returns the read value
  */
-inline uint16_t readUint16(uint8_t* data, int offset){
+inline uint16_t readUint16(const uint8_t* data, int offset){
     uint16_t ret;
     ret = data[offset];
     ret = (ret << 8) + data[offset + 1];
@@ -100,7 +113,7 @@ inline uint16_t readUint16(uint8_t* data, int offset){
  * @param offset offset into the buffer to read
  * @returns the read value
  */
-inline uint32_t readUint32(uint8_t* data, int offset)
+inline uint32_t readUint32(const uint8_t* data, int offset)
 {
     uint32_t ret;
     ret = data[offset];
@@ -119,10 +132,11 @@ int isAck(const Packet* ackPacket );
 
 /*
  * @brief Determines if an acknowledgement packet is acking a packet you transmitted
- * @param transmittedPacketsCrc16 the 16 bit crc of the packet you transmitted
+ * @param transmittedPackets the packet you transmitted
  * @param ackPacket the acknowledgement packet. Verify this is an ack with isAck
- * @return 1 if this Ack is acknowledging the transmitted packet. 0 if it's acknowledging some other packet.
+ * @return 1 if this Ack is acknowledging the transmitted packet.
+ *         0 if it's acknowledging some other packet.
  */
-int isAcking( uint16_t transmittedPacketsCrc16, const Packet* ackPacket );
+int isAcking( const Packet* transmittedPacket, const Packet* ackPacket );
 
 #endif
