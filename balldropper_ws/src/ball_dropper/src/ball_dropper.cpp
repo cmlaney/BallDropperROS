@@ -270,7 +270,7 @@ bool operation(ball_dropper::Operation::Request &req,
         
         acked = false;
 
-        printf("Transmitted SeqID: %u, CRC16: %u\n", transmittedPacket->sequenceId, transmittedPacket->crc16);
+        //printf("Transmitted SeqID: %u, CRC16: %u\n", transmittedPacket->sequenceId, transmittedPacket->crc16);
 
         //Wait for timeout, acknowledgement, or infer communication success from the heartbeat
         ros::Time startWaitTime = ros::Time::now();
@@ -367,18 +367,18 @@ void listenerThread(void)
                 else if (receivedPkt->dataLength == 32)
                 {
                     //Heartbeat packet
-                    printf("Heartbeat Packet Received\n");
+                    //printf("Heartbeat Packet Received\n");
                     parseHeartbeatPacket(receivedPkt->data);
                 }
                 //This must be some unrecognized binary data packet.
                 else
                 {
-                    printf("Data Packet Received\n");
+                    //printf("Data Packet Received\n");
                 }
             }
             else
             {
-                printf("Ack SeqID: %u, CRC16: %u received\n", receivedPkt->sequenceId, receivedPkt->crc16 );
+                //printf("Ack SeqID: %u, CRC16: %u received\n", receivedPkt->sequenceId, receivedPkt->crc16 );
                 //Is this ack acking a packet we sent?
                 if (!acked && transmittedPacket != NULL && isAcking(transmittedPacket, receivedPkt))
                 {
