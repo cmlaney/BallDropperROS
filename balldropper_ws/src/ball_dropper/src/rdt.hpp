@@ -31,25 +31,7 @@ typedef struct packet_
  * 
  * @return The next packet that has been received, or NULL if no packet ready.
  */
-Packet* checkForPacket(Serial* serial);
-
-/*
- * @brief Non-blocking function to receive data packets over serial.
- * May return Acknowledgement packets, which have 0 data length, and the crc is the
- * crc of the acknowledged packet.
- * Does not send acknowledgement packets
- * 
- * @return The next packet that has been received, or NULL if no packet ready.
- */
-//Packet* checkForPacketDontAck(Serial* serial);
-
-/*
- * @brief Retries transmission of the previous packet.
- * Duplicate retransmissions will be ignored by the receiver.
- * @return A datastructure of the transmitted packet, to be used when checking if
- * the packet was acknowledged. Null if error.
- */
-const Packet* retryTransmission(Serial* serial);
+const Packet* checkForPacket(Serial* serial);
 
 /*
  * @brief Transmits a data packet over the serial connection
@@ -67,6 +49,30 @@ const Packet* transmitPacket( const uint8_t* data, uint8_t dataLength, Serial* s
  * the packet was acknowledged. Null if error.
  */
 const Packet* transmitStringPacket( const char* str, Serial* serial );
+
+/*
+ * @brief Retries transmission of the previous packet.
+ * Duplicate retransmissions will be ignored by the receiver.
+ * @return A datastructure of the transmitted packet, to be used when checking if
+ * the packet was acknowledged. Null if error.
+ */
+const Packet* retryTransmission(Serial* serial);
+
+/*
+ * @brief Determines if a packet is an acknowledgement packet or a data packet
+ * @param packet the packet to check
+ * @return 1 if the packet is an Acknowledgement. 0 if the packet is a data packet
+ */
+int isAck(const Packet* ackPacket );
+
+/*
+ * @brief Determines if an acknowledgement packet is acking a packet you transmitted
+ * @param transmittedPackets the packet you transmitted
+ * @param ackPacket the acknowledgement packet. Verify this is an ack with isAck
+ * @return 1 if this Ack is acknowledging the transmitted packet.
+ *         0 if it's acknowledging some other packet.
+ */
+int isAcking( const Packet* transmittedPacket, const Packet* ackPacket );
 
 /*
  * @brief Packs a uint16_t into a byte buffer in network order.
@@ -124,19 +130,9 @@ inline uint32_t readUint32(const uint8_t* data, int offset)
 }
 
 /*
- * @brief Determines if a packet is an acknowledgement packet or a data packet
- * @param packet the packet to check
- * @return 1 if the packet is an Acknowledgement. 0 if the packet is a data packet
+ * @brief Assumes any packet with length greater than this has been corrupted.
+ * @param maxAllowedDataLength the maximum data length to treat as valid.
  */
-int isAck(const Packet* ackPacket );
-
-/*
- * @brief Determines if an acknowledgement packet is acking a packet you transmitted
- * @param transmittedPackets the packet you transmitted
- * @param ackPacket the acknowledgement packet. Verify this is an ack with isAck
- * @return 1 if this Ack is acknowledging the transmitted packet.
- *         0 if it's acknowledging some other packet.
- */
-int isAcking( const Packet* transmittedPacket, const Packet* ackPacket );
+void setMaxAllowedDataLength(uint8_t maxAllowedDataLength);
 
 #endif

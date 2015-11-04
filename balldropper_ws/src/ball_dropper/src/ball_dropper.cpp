@@ -340,10 +340,11 @@ bool operation(ball_dropper::Operation::Request &req,
 
 void listenerThread(void)
 {
-    Packet* receivedPkt;
+    const Packet* receivedPkt;
 
     //Run until interrupted
     ros::Rate r(60);
+    ros::Time timeOfLastHeartbeat = ros::Time::now();
     while (ros::ok())
     {
         receivedPkt = checkForPacket(serialPort.get());
@@ -354,11 +355,11 @@ void listenerThread(void)
                 //Is this a string packet?
                 if (receivedPkt->data[receivedPkt->dataLength - 1] == '\0')
                 {
-                    printf("String Packet Received: %s\n", receivedPkt->data);
+                    printf("String Packet Received: %s", receivedPkt->data);
                     //Are we looking for an error string packet?
                     if (expectingErrorString)
                     {
-                        strcpy(errorString, (char*)receivedPkt->data);
+                        strcpy(errorString, (const char*)receivedPkt->data);
                         acked = true;
                         expectingErrorString = false;
                     }
@@ -369,6 +370,9 @@ void listenerThread(void)
                     //Heartbeat packet
                     //printf("Heartbeat Packet Received\n");
                     parseHeartbeatPacket(receivedPkt->data);
+
+                    //std::cout << (ros::Time::now() - timeOfLastHeartbeat).toSec() << std::endl;
+                    timeOfLastHeartbeat = ros::Time::now();
                 }
                 //This must be some unrecognized binary data packet.
                 else
@@ -396,6 +400,8 @@ int main(int argc, char **argv)
     //Create a node
     ros::init(argc, argv, "ball_dropper_node");
     ros::NodeHandle n;
+
+    setMaxAllowedDataLength(32);
 
     serialPort.reset(new Serial("/dev/ttyUSB0", 9600));
 

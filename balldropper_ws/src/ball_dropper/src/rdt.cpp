@@ -1,17 +1,42 @@
+/*
+ * @brief: Methods for reliable transfer of data packets
+ *
+ * @author: Evan Beachly
+ * @date: 11/3/2015 12:24 PM
+ * 
+ */
+
 #include "rdt.hpp"
 
-//Buffer to construct the packet in
-uint8_t rdt_readBytes[300];
-int rdt_readBytesLength = 0;
-Packet rdt_receivedPacket = {0, 0, &rdt_readBytes[3], 0};
+
+/*** Protocol Definitions ***/
+#define START_BYTE 0xEB
+#define HEADER_PLUS_TRAILER_LENGTH 5
+
+#define START_BYTE_INDEX 0
+#define DATA_LENGTH_INDEX 1
+#define SEQUENCE_NUM_INDEX 2
+#define DATA_INDEX 3
+#define CHECKSUM_MSB_INDEX -2
+#define CHECKSUM_LSB_INDEX -1
+
+/*** GLOBALS ***/
+//Buffer to construct the packet in. Must be larger than 256 + HEADER_PLUS_TRAILER_LENGTH
+#define BUFFER_SIZE 300
+uint8_t rdt_readBytes[BUFFER_SIZE];
+uint16_t rdt_readBytesLength = 0;
+uint8_t rdt_dataBytes[256];
+Packet rdt_receivedPacket = {0, 0, rdt_dataBytes, 0};
 Packet rdt_transmittedPacket;
+uint8_t rdt_maxAllowedDataLength = 255;
 
 uint16_t rdt_rxSequenceId = 0xFFFF;
 uint8_t rdt_txSequenceId = 0;
 
-char hexToAscii[] = {'0','1','2','3','4','5','6','7','8','9','A','B','C','D','E','F'};
-
-static const uint8_t rdt_startByte = 0xEB;
+void setMaxAllowedDataLength(uint8_t maxAllowedDataLength)
+{
+    rdt_maxAllowedDataLength = maxAllowedDataLength;
+}
 
 /*
  * @brief Determines if a packet is an acknowledgement packet or a data packet
@@ -62,144 +87,143 @@ inline uint8_t receiveByte(uint8_t* byt, Serial* serial)
 
 //Returns NULL if no packet ready. Returns pointer to packet if a packet is ready.
 //Acknowledgement packets have 0 data length, and the crc is the crc of the ack'd packet.
-Packet* checkForPacketDontAck( Serial* serial )
+const Packet* checkForPacket( Serial* serial )
 {
-    uint16_t calcCrc16;
-    uint16_t readCrc16;
-    uint8_t dataAvailable;
-    uint8_t readByte;
-    //Check for data available
-    dataAvailable = receiveByte(&readByte, serial);
-    if (dataAvailable)
+  uint16_t calcCrc16;
+  uint16_t readCrc16;
+  uint16_t packetLength;
+  uint8_t readByte;
+  Packet* ret = NULL;
+
+  uint16_t numRemainingBufferedBytes;
+  uint16_t i;
+  uint8_t isCorrupted = 0;
+
+  //Receive bytes until the buffer is full or the stream is empty
+  while (rdt_readBytesLength < BUFFER_SIZE && receiveByte(&readByte, serial))
+  {
+    //Copy the byte if we've already started receiving of a packet,
+    //or if it's a start byte
+    if (rdt_readBytesLength || readByte == START_BYTE)
     {
-        //printf("%c%c ", hexToAscii[readByte >> 4], hexToAscii[readByte & 0x0F]);
-        fflush(stdout);
-        //Check if we aren't in the middle of a packet
-        if (rdt_readBytesLength == 0 )
+      rdt_readBytes[rdt_readBytesLength] = readByte;
+      ++rdt_readBytesLength;
+    }
+  }
+
+  //Do we have enough bytes for a complete packet?
+  if (rdt_readBytesLength >= HEADER_PLUS_TRAILER_LENGTH)
+  {
+    packetLength = 0;
+    //Is this an allowed data length?
+    if (rdt_readBytes[DATA_LENGTH_INDEX] > rdt_maxAllowedDataLength)
+    {
+        //Assume the data was corrupted
+        isCorrupted = 1;
+    }
+    //Do we have enough bytes for this packet's data length?
+    else if ( rdt_readBytesLength >= (rdt_readBytes[DATA_LENGTH_INDEX] + HEADER_PLUS_TRAILER_LENGTH) )
+    {
+        packetLength = rdt_readBytes[DATA_LENGTH_INDEX] + HEADER_PLUS_TRAILER_LENGTH;
+        //Read the CRC
+        readCrc16 = rdt_readBytes[packetLength + CHECKSUM_MSB_INDEX];
+        readCrc16 = readCrc16 << 8;
+        readCrc16 = readCrc16 | rdt_readBytes[packetLength + CHECKSUM_LSB_INDEX];
+
+        //Check if this packet is an acknowledgement
+        if ( rdt_readBytes[DATA_LENGTH_INDEX] == 0 )
         {
-            //Check that this is the start of a new packet
-            if (readByte == rdt_startByte)
-            {
-                //Copy it into the buffer
-                rdt_readBytes[rdt_readBytesLength] = readByte;
-                rdt_readBytes[1] = 0;
-                ++rdt_readBytesLength;
-            }
-            else
-            {
-                //Unexpected start byte. Throw it away
-                //printf("Unexpected Start Byte: %d\n", readByte);
-                return NULL;
-            }
+          //This is an acknowledgement. Return the packet without validating the
+          //checksum or acking the ack.
+          rdt_receivedPacket.dataLength = rdt_readBytes[DATA_LENGTH_INDEX];
+          rdt_receivedPacket.sequenceId = rdt_readBytes[SEQUENCE_NUM_INDEX];
+          //rdt_receivedPacket.data = &rdt_dataBytes[0];
+          rdt_receivedPacket.crc16 = readCrc16;
+          ret = &rdt_receivedPacket;
         }
-        else  //We are in the middle of a packet
+        else
         {
-            //Copy the byte
-            rdt_readBytes[rdt_readBytesLength] = readByte;
-            ++rdt_readBytesLength;
-        }
-        //Read until the end of the packet or the end of the buffer
-        while ( (rdt_readBytesLength < (rdt_readBytes[1] + 5)) &&
-                ((dataAvailable = receiveByte(&readByte, serial)) != 0)
-                )
-        {
-            //Copy the byte
-            rdt_readBytes[rdt_readBytesLength] = readByte;
-            ++rdt_readBytesLength;
-        }
-        //Is this packet complete?
-        if (rdt_readBytesLength == (rdt_readBytes[1] + 5))
-        {
-            //Read the CRC
-            readCrc16 = rdt_readBytes[rdt_readBytesLength - 2];
-            readCrc16 = readCrc16 << 8;
-            readCrc16 = readCrc16 | rdt_readBytes[rdt_readBytesLength -1];
+          //Not an acknowledgement.
 
-            //Indicate that this packet is complete, so we can get the next one.
-            rdt_readBytesLength = 0;
+          //Verify the checksum
+          calcCrc16 = calculateCrc(&rdt_readBytes[DATA_INDEX], 0, rdt_readBytes[DATA_LENGTH_INDEX]);
+          
+          if (readCrc16 == calcCrc16)
+          {
+            //A complete packet
 
-            //Check if this packet is an acknowledgement
-            if ( rdt_readBytes[1] == 0 && readCrc16 != 0xFFFF )
-            {
-                //This is an acknowledgement. Return the packet without validating the
-                //checksum or acking the ack.
-                rdt_receivedPacket.dataLength = rdt_readBytes[1];
-                rdt_receivedPacket.sequenceId = rdt_readBytes[2];
-                rdt_receivedPacket.data = &rdt_readBytes[3];
-                rdt_receivedPacket.crc16 = readCrc16;
-
-                //Update the received sequence Id
-                rdt_rxSequenceId = rdt_receivedPacket.sequenceId;
-
-                return &rdt_receivedPacket;
-            }
-
-            //Not an acknowledgement.
             //Compare the sequence Id to detect duplicate packets.
-            if (rdt_rxSequenceId == rdt_readBytes[2])
+            if (rdt_rxSequenceId == rdt_readBytes[SEQUENCE_NUM_INDEX])
             {
-                //Duplicate packet. Throw away
-                return NULL;
-            }
-
-            //Verify the checksum
-            calcCrc16 = calculateCrc(&rdt_readBytes[3], 0, rdt_readBytes[1]);
-
-            if (readCrc16 == calcCrc16)
-            {
-                //A complete, valid packet. Return the packet structure
-                rdt_receivedPacket.dataLength = rdt_readBytes[1];
-                rdt_receivedPacket.sequenceId = rdt_readBytes[2];
-                rdt_receivedPacket.data = &rdt_readBytes[3];
-                rdt_receivedPacket.crc16 = readCrc16;
-
-                //Update the received sequence id
-                rdt_rxSequenceId = rdt_receivedPacket.sequenceId;
-
-                //printf("Data Packet Received: %s\n", receivedPacket.data);
-                return &rdt_receivedPacket;
+              //Duplicate packet. Throw away
             }
             else
             {
-                //Invalid Checksum. Throw away the packet
-                if (rdt_readBytes[1] > 0)
-                {
-                    //printf("Invalid Checksum over [%s]", &rdt_readBytes[2]);
-                }
-                else
-                {
-                    //printf("Invalid Checksum\n");
-                }
+              //A valid packet
 
-                return NULL;
+              //Return the packet structure
+              rdt_receivedPacket.dataLength = rdt_readBytes[DATA_LENGTH_INDEX];
+              rdt_receivedPacket.sequenceId = rdt_readBytes[SEQUENCE_NUM_INDEX];
+              //rdt_receivedPacket.data = &rdt_dataBytes[0];
+              rdt_receivedPacket.crc16 = readCrc16;
+              //Copy the data
+              for (i = 0; i < rdt_receivedPacket.dataLength; ++i)
+              {
+                rdt_dataBytes[i] = rdt_readBytes[DATA_INDEX + i];
+              }
+
+              //Update the received sequence id
+              rdt_rxSequenceId = rdt_receivedPacket.sequenceId;
+              ret = &rdt_receivedPacket;
             }
-        }
-        //Incomplete packet. Need more data before we can return it.
-        return NULL;
-    }
-    else
-    {
-        //Nothing read, so nothing to do
-        return NULL;
-    }
-}
 
-Packet* checkForPacket( Serial* serial )
-{
-    Packet* receivedPacket;
-    receivedPacket = checkForPacketDontAck(serial);
-    if ((receivedPacket != NULL) && !isAck(receivedPacket))
-    {
-        transmitAck(receivedPacket->crc16, receivedPacket->sequenceId, serial);
+            //Acknowledge
+            transmitAck(readCrc16, rdt_readBytes[SEQUENCE_NUM_INDEX], serial);
+          }
+          else
+          {
+            //Invalid Checksum.
+            //Corrupted data
+            isCorrupted = 1;
+          }
+        }
     }
-    return receivedPacket;
+
+    //If this was not an allowed data length, or the checksum was invalid, the data may have been corrupted
+    if (isCorrupted)
+    {
+        //Look for the next start byte
+        for (packetLength = 1; packetLength < rdt_readBytesLength; ++packetLength)
+        {
+          if (rdt_readBytes[packetLength] == START_BYTE)
+          {
+            printf("It happened! Index: %u. Data Length: %u\n", packetLength, rdt_readBytes[DATA_LENGTH_INDEX]);
+            break;
+          }
+        }
+    }
+
+    //Shift unprocessed bytes to the front
+    numRemainingBufferedBytes = rdt_readBytesLength - packetLength;
+    for (rdt_readBytesLength = 0; rdt_readBytesLength < numRemainingBufferedBytes; ++rdt_readBytesLength)
+    {
+        rdt_readBytes[rdt_readBytesLength] = rdt_readBytes[rdt_readBytesLength + packetLength];
+    }
+    
+  }
+  else
+  {
+    //Incomplete packet. Need more data before we can return it.
+  }
+
+  return ret;
 }
 
 // Transmits an Acknowledgement packet. This has 0 data length, but the crc is the crc of the acknowledged packet.
 void transmitAck( uint16_t crc16, uint8_t sequenceId, Serial* serial  )
 {
     //First byte is start Byte
-    sendByte(rdt_startByte, serial);
+    sendByte(START_BYTE, serial);
     //Second byte is dataLength
     sendByte(0, serial);
     //Third byte is sequenceId
@@ -219,7 +243,7 @@ const Packet* retryTransmission(Serial* serial)
     }
     //Transmit it
     //First byte is start Byte
-    sendByte(rdt_startByte, serial);
+    sendByte(START_BYTE, serial);
     //Second byte is dataLength
     sendByte(rdt_transmittedPacket.dataLength, serial);
     //Third byte is sequenceId
