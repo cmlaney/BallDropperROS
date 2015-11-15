@@ -22,6 +22,7 @@ uint8 rotateMotorOn
 uint8 driveMotorOn
 uint8 injectMotorOn
 
+uint32 batteryVoltage
 uint32 actionStartTime
 uint32 actionDuration
 uint32 counterStartVal

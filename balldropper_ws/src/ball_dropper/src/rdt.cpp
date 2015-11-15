@@ -197,7 +197,7 @@ const Packet* checkForPacket( Serial* serial )
         {
           if (rdt_readBytes[packetLength] == START_BYTE)
           {
-            printf("It happened! Index: %u. Data Length: %u\n", packetLength, rdt_readBytes[DATA_LENGTH_INDEX]);
+            //printf("It happened! Index: %u. Data Length: %u\n", packetLength, rdt_readBytes[DATA_LENGTH_INDEX]);
             break;
           }
         }

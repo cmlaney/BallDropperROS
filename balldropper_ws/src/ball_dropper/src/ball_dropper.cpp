@@ -53,6 +53,7 @@ bool hatchFailure = false;
 bool wheelFailure = false;
 bool driverFailure = false;
 bool injectorFailure = false;
+uint32_t batteryVoltage;
 uint32_t actionStartTime;
 uint32_t actionDuration;
 uint32_t counterStartVal;
@@ -86,6 +87,7 @@ void publishHeartbeatMsg()
     heartbeatMsg.rotateMotorOn = rotateMotorOn ? 1 : 0;
     heartbeatMsg.driveMotorOn = driveMotorOn ? 1 : 0;
     heartbeatMsg.injectMotorOn = injectMotorOn ? 1 : 0;
+    heartbeatMsg.batteryVoltage = batteryVoltage;
     heartbeatMsg.actionStartTime = actionStartTime;
     heartbeatMsg.actionDuration = actionDuration;
     heartbeatMsg.counterStartVal = counterStartVal;
@@ -189,6 +191,9 @@ void parseHeartbeatPacket(const uint8_t* data)
     injectMotorOn = flags & 0x40 ? true : false;
     ++offset;
 
+    batteryVoltage = readUint32(data,offset);
+    offset+=4;
+
     actionStartTime = readUint32(data,offset);
     offset+=4;
 
@@ -256,7 +261,7 @@ bool operation(ball_dropper::Operation::Request &req,
 
     bool success = false;
     //For each available attempt
-    for (int attemptCount = 0; attemptCount < 3; ++attemptCount)
+    for (int attemptCount = 0; attemptCount < 1; ++attemptCount)
     {
         //Transmit the packet
         if (attemptCount == 0)
@@ -341,6 +346,9 @@ bool operation(ball_dropper::Operation::Request &req,
 void listenerThread(void)
 {
     const Packet* receivedPkt;
+    int expectedSequenceNum = -1;
+    int numReceivedPackets = 0;
+    int numDroppedPackets = 0;
 
     //Run until interrupted
     ros::Rate r(60);
@@ -352,10 +360,27 @@ void listenerThread(void)
         {
             if ( !isAck(receivedPkt) )
             {
+                ++numReceivedPackets;
+                //Check if we've lost any packets
+                if (expectedSequenceNum == -1)
+                {
+                    while (expectedSequenceNum != receivedPkt->sequenceId)
+                    {
+                        printf("Dropped packet %d\n", expectedSequenceNum);
+                        expectedSequenceNum =  0xFF & (expectedSequenceNum + 1);
+                        ++numDroppedPackets;
+                    }
+                }
+                expectedSequenceNum = 0xFF & (receivedPkt->sequenceId + 1);
+
+                //Compute communication percentage
+                double totalPackets = numDroppedPackets + numReceivedPackets;
+                printf("Communication Rate: %f%%\n", (double) numReceivedPackets / totalPackets);
+
                 //Is this a string packet?
                 if (receivedPkt->data[receivedPkt->dataLength - 1] == '\0')
                 {
-                    printf("String Packet Received: %s", receivedPkt->data);
+                    printf("String Packet Received: %s\n", receivedPkt->data);
                     //Are we looking for an error string packet?
                     if (expectingErrorString)
                     {
@@ -365,11 +390,18 @@ void listenerThread(void)
                     }
                 }
                 //Is this a heartbeat packet?
-                else if (receivedPkt->dataLength == 32)
+                else if (receivedPkt->dataLength == 36)
                 {
                     //Heartbeat packet
                     //printf("Heartbeat Packet Received\n");
                     parseHeartbeatPacket(receivedPkt->data);
+
+                    double timeSinceLastHeartbeat = (ros::Time::now() - timeOfLastHeartbeat).toSec();
+
+                    if (timeSinceLastHeartbeat > 0.3)
+                    {
+                        std::cout << timeSinceLastHeartbeat << std::endl;
+                    }
 
                     //std::cout << (ros::Time::now() - timeOfLastHeartbeat).toSec() << std::endl;
                     timeOfLastHeartbeat = ros::Time::now();
@@ -401,9 +433,9 @@ int main(int argc, char **argv)
     ros::init(argc, argv, "ball_dropper_node");
     ros::NodeHandle n;
 
-    setMaxAllowedDataLength(32);
+    setMaxAllowedDataLength(36);
 
-    serialPort.reset(new Serial("/dev/ttyUSB0", 9600));
+    serialPort.reset(new Serial("/dev/ttyUSB1", 9600));
 
     heartbeatPub = n.advertise<ball_dropper_msgs::Heartbeat>("heartbeat", 100);
     ros::Subscriber consoleSub = n.subscribe("ballDropperMsg", 10, consoleCallback);
