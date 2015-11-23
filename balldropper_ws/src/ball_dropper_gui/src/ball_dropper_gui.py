@@ -129,7 +129,7 @@ class BallDropperGUI(Frame):
 		self.dropButtonLabel = Label(self.operationFrame, font=("TkDefaultFont", fontSize), text="Drop:", width=labWidth).grid(row=row, column=0, padx=padx, pady=pady, sticky="W")
 		self.dropNum = Entry(self.operationFrame, width=buttonWidth, validate='key', validatecommand=vcmdDropNum)
 		self.dropNum.grid(row=row, column=1, padx=padx, pady=pady, sticky="W")
-		self.dropNum.insert(0, '1')
+		self.dropNum.insert(0, '0')
 		self.dropButton = Button(self.operationFrame, text="Execute", command=self.drop, width=buttonWidth)
 		self.dropButton.grid(row=row, column=2, padx=padx, pady=pady, sticky="W")
 		row += 1
@@ -138,18 +138,18 @@ class BallDropperGUI(Frame):
 		self.rotateButtonLabel = Label(self.operationFrame, font=("TkDefaultFont", fontSize), text="Rotate:", width=labWidth).grid(row=row, column=0, padx=padx, pady=pady, sticky="W")
 		self.rotateNum = Entry(self.operationFrame, width=buttonWidth, validate='key', validatecommand=vcmdRotateNum)
 		self.rotateNum.grid(row=row, column=1, padx=padx, pady=pady, sticky="W")
-		self.rotateNum.insert(0, '1')
-		self.rotateButton = Button(self.operationFrame, text="Execute", command=self.rotate, width=buttonWidth)
+		self.rotateNum.insert(0, '0')
+		self.rotateButton = Button(self.operationFrame, text="Execute", command=self.rotateNTimes, width=buttonWidth)
 		self.rotateButton.grid(row=row, column=2, padx=padx, pady=pady, sticky="W")
 		row += 1
 
 		vcmdInjectNum = (self.register(self.onInjectNumValidate), '%P', '%S')
-		self.injectButtonLabel = Label(self.operationFrame, font=("TkDefaultFont", fontSize), text="Inject:", width=labWidth).grid(row=row, column=0, padx=padx, pady=pady, sticky="W")
-		self.injectNum = Entry(self.operationFrame, width=buttonWidth, validate='key', validatecommand=vcmdInjectNum)
-		self.injectNum.grid(row=row, column=1, padx=padx, pady=pady, sticky="W")
-		self.injectNum.insert(0, '1')
-		self.injectButton = Button(self.operationFrame, text="Execute", command=self.injectNTimes, width=buttonWidth)
-		self.injectButton.grid(row=row, column=2, padx=padx, pady=pady, sticky="W")
+		self.injectFieldLabel = Label(self.operationFrame, font=("TkDefaultFont", fontSize), text="Inject:", width=labWidth).grid(row=row, column=0, padx=padx, pady=pady, sticky="W")
+		self.injectFieldNum = Entry(self.operationFrame, width=buttonWidth, validate='key', validatecommand=vcmdInjectNum)
+		self.injectFieldNum.grid(row=row, column=1, padx=padx, pady=pady, sticky="W")
+		self.injectFieldNum.insert(0, '0')
+		self.injectFieldButton = Button(self.operationFrame, text="Execute", command=self.injectNTimes, width=buttonWidth)
+		self.injectFieldButton.grid(row=row, column=2, padx=padx, pady=pady, sticky="W")
 		row += 1
 
 		self.hatchButtonLabel = Label(self.operationFrame, font=("TkDefaultFont", fontSize), text="Hatch:", width=labWidth).grid(row=row, column=0, padx=padx, pady=pady, sticky="W")
@@ -166,7 +166,7 @@ class BallDropperGUI(Frame):
 		self.reloadBallsButtonLabel = Label(self.operationFrame, font=("TkDefaultFont", fontSize), text="Reload Balls:", width=labWidth).grid(row=row, column=0, padx=padx, pady=pady, sticky="W")
 		self.reloadBallsNum = Entry(self.operationFrame, width=buttonWidth, validate='key', validatecommand=vcmdReloadBallsNum)
 		self.reloadBallsNum.grid(row=row, column=1, padx=padx, pady=pady, sticky="W")
-		self.reloadBallsNum.insert(0, '1')
+		self.reloadBallsNum.insert(0, '0')
 		self.reloadBallsButton = Button(self.operationFrame, text="Add", command=self.reloadBalls, width=buttonWidth)
 		self.reloadBallsButton.grid(row=row, column=2, padx=padx, pady=pady, sticky="W")
 		row += 1
@@ -452,13 +452,15 @@ class BallDropperGUI(Frame):
 				self.rotate()
 
 	def injectNTimes(self):
-		if self.injectNum.get().isdigit():
-			for i in range(0,int(self.injectNum.get())):
+		if self.injectFieldNum.get().isdigit():
+			for i in range(0,int(self.injectFieldNum.get())):
 				self.inject()
+		else:
+			print('Failed')
 		self.updateInjectList()
-		if int(self.injectNum.get()) > self.remainingInjections:
-			self.injectNum.delete(0, 'end')
-			self.injectNum.insert(0, str(self.remainingInjections))
+		if int(self.injectFieldNum.get()) > self.remainingInjections:
+			self.injectFieldNum.delete(0, 'end')
+			self.injectFieldNum.insert(0, str(self.remainingInjections))
 
 	def reloadBalls(self):
 		if self.reloadBallsNum.get().isdigit():
@@ -500,9 +502,9 @@ class BallDropperGUI(Frame):
 
 	def updateInjectList(self):
 		if self.remainingInjections == 0:
-			self.injectButton.config(state='disabled')
+			self.injectFieldButton.config(state='disabled')
 		else:
-			self.injectButton.config(state='normal')
+			self.injectFieldButton.config(state='normal')
 
 	def handleHeartbeat(self, heartbeat):
 	#Check for idle
@@ -596,7 +598,7 @@ class BallDropperGUI(Frame):
 		self.freqVal.config(text=str(int(self.freq))+' Hz')
 		text = 'Ok'
 		fg = 'green'
-		if self.freq < 2:
+		if self.freq < 1:
 			text = 'Lost connection!'
 			fg = 'red'
 		self.connVal.config(text=text, foreground=fg)
