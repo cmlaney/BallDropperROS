@@ -1,0 +1,4 @@
+<launch>
+	<node name="ball_dropper_sim" type="ball_dropper_sim" pkg="ball_dropper_gui" output="screen" />
+	<!--node name="gui" type="ball_dropper_gui.py" pkg="ball_dropper_gui" output="screen" /-->
+</launch>
