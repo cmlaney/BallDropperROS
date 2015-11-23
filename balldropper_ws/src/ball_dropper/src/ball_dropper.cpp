@@ -362,7 +362,7 @@ void listenerThread(void)
             {
                 ++numReceivedPackets;
                 //Check if we've lost any packets
-                if (expectedSequenceNum == -1)
+                if (expectedSequenceNum != -1)
                 {
                     while (expectedSequenceNum != receivedPkt->sequenceId)
                     {
@@ -435,7 +435,7 @@ int main(int argc, char **argv)
 
     setMaxAllowedDataLength(36);
 
-    serialPort.reset(new Serial("/dev/ttyUSB1", 9600));
+    serialPort.reset(new Serial("/dev/ttyUSB0", 9600));
 
     heartbeatPub = n.advertise<ball_dropper_msgs::Heartbeat>("heartbeat", 100);
     ros::Subscriber consoleSub = n.subscribe("ballDropperMsg", 10, consoleCallback);

@@ -1,4 +1,5 @@
 <launch>
 	<node name="ball_dropper_node" type="ball_dropper_node" pkg="ball_dropper" output="screen" />
-	<node name="heartbeat_analyzer_node" type="heartbeat_analyzer_node" pkg="heartbeat_analyzer" output="screen" />
+	<node name="ball_dropper_gui" type="ball_dropper_gui.py" pkg="ball_dropper_gui" />
+	<!--<node name="heartbeat_analyzer_node" type="heartbeat_analyzer_node" pkg="heartbeat_analyzer" output="screen" /> -->
 </launch>
