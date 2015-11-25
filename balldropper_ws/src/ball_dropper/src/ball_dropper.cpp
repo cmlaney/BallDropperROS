@@ -366,7 +366,7 @@ void listenerThread(void)
                 {
                     while (expectedSequenceNum != receivedPkt->sequenceId)
                     {
-                        printf("Dropped packet %d\n", expectedSequenceNum);
+                        //printf("Dropped packet %d\n", expectedSequenceNum);
                         expectedSequenceNum =  0xFF & (expectedSequenceNum + 1);
                         ++numDroppedPackets;
                     }
@@ -375,12 +375,12 @@ void listenerThread(void)
 
                 //Compute communication percentage
                 double totalPackets = numDroppedPackets + numReceivedPackets;
-                printf("Communication Rate: %f%%\n", (double) numReceivedPackets / totalPackets);
+                //printf("Communication Rate: %f%%\n", (double) numReceivedPackets / totalPackets);
 
                 //Is this a string packet?
                 if (receivedPkt->data[receivedPkt->dataLength - 1] == '\0')
                 {
-                    printf("String Packet Received: %s\n", receivedPkt->data);
+                    //printf("String Packet Received: %s\n", receivedPkt->data);
                     //Are we looking for an error string packet?
                     if (expectingErrorString)
                     {
@@ -401,6 +401,7 @@ void listenerThread(void)
                     if (timeSinceLastHeartbeat > 0.3)
                     {
                         std::cout << timeSinceLastHeartbeat << std::endl;
+                        printf("Communication Rate: %f%%\n", (double) numReceivedPackets / totalPackets);
                     }
 
                     //std::cout << (ros::Time::now() - timeOfLastHeartbeat).toSec() << std::endl;
