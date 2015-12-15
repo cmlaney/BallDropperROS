@@ -7,7 +7,7 @@ project(heartbeat_analyzer)
 find_package(catkin REQUIRED COMPONENTS
     roscpp
     std_msgs
-    ball_dropper_msgs
+    ball_dropper
     message_generation
 )
 
@@ -23,7 +23,7 @@ find_package(catkin REQUIRED COMPONENTS
 # generate_messages(
 #   DEPENDENCIES
 #   std_msgs
-#   ball_dropper_msgs
+#   ball_dropper
 # )
 
 catkin_package(

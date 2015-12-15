@@ -1,3 +1,4 @@
-uint8 opCode
+uint8 varCode
+uint32 val
 ---
 bool communicationFailure

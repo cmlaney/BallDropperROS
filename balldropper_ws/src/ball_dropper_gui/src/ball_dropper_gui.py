@@ -7,7 +7,7 @@ import signal
 import Queue
 
 from ball_dropper.srv import *
-from ball_dropper_msgs.msg import Heartbeat
+from ball_dropper.msg import Heartbeat
 import rospy
 
 

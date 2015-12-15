@@ -8,7 +8,7 @@
 #include "geometry_msgs/Twist.h"
 #include "std_msgs/String.h"
 #include "std_msgs/UInt8.h"
-#include "ball_dropper_msgs/Heartbeat.h"
+#include "ball_dropper/Heartbeat.h"
 #include "ball_dropper/Operation.h"
 #include "boost/date_time/posix_time/posix_time.hpp"
 #include "boost/thread.hpp"
@@ -61,7 +61,7 @@ bool idle = true;
 ros::Publisher heartbeatPub;
 void publishHeartbeatMsg()
 {
-    ball_dropper_msgs::Heartbeat heartbeatMsg;
+    ball_dropper::Heartbeat heartbeatMsg;
 
     heartbeatMsg.header.stamp = ros::Time::now();
     if(ros::Time::now().toSec() - timeOfLastOp > 1 && !idle) {
@@ -228,7 +228,7 @@ int main(int argc, char **argv)
 
     ros::Timer heartbeatSim = n.createTimer(ros::Duration(0.1),genHeartbeat);
 
-    heartbeatPub = n.advertise<ball_dropper_msgs::Heartbeat>("heartbeat", 100);
+    heartbeatPub = n.advertise<ball_dropper::Heartbeat>("heartbeat", 100);
     ros::ServiceServer operationService = n.advertiseService("operation", operation);
 
     //Handle subscriber and service server callbacks in this thread

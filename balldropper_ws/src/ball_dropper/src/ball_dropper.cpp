@@ -10,10 +10,14 @@
 
 #include "ros/ros.h"
 #include "geometry_msgs/Twist.h"
-#include "std_msgs/String.h"
 #include "std_msgs/UInt8.h"
-#include "ball_dropper_msgs/Heartbeat.h"
+#include "ball_dropper/Heartbeat.h"
+#include "ball_dropper/String.h"
+#include "ball_dropper/Configuration.h"
 #include "ball_dropper/Operation.h"
+#include "ball_dropper/Configure.h"
+#include "ball_dropper/GetConfiguration.h"
+#include "ball_dropper/GetErrorString.h"
 #include "rdt.hpp"
 #include "boost/date_time/posix_time/posix_time.hpp"
 #include "boost/thread.hpp"
@@ -31,212 +35,98 @@
 #define OP_CALIBRATE 100
 #define OP_GET_ERROR_STRING 101
 #define OP_CLEAR_ERRORS 102
+#define OP_SET 103
+#define OP_GET_CONFIGURATION 104
 #define OP_EMG_STOP 255
+
+#define OP_SET_ROTATE_COUNTER               0x01
+#define OP_SET_DRIVE_COUNTER                0x02
+#define OP_SET_INJECT_COUNTER               0x04
+#define OP_SET_ROTATE_THRESHOLD             0x11
+#define OP_SET_DRIVE_ON_THRESHOLD           0x12
+#define OP_SET_DRIVE_OFF_THRESHOLD          0x13
+#define OP_SET_INJECT_THRESHOLD             0x14
+#define OP_SET_ROTATE_TIMEOUT               0x21
+#define OP_SET_DRIVE_ON_TIMEOUT             0x22
+#define OP_SET_DRIVE_OFF_TIMEOUT            0x23
+#define OP_SET_INJECT_TIMEOUT               0x24
+#define OP_SET_ROTATE_MAX_CURRENT           0x31
+#define OP_SET_DRIVE_ON_MAX_CURRENT         0x32
+#define OP_SET_DRIVE_OFF_MAX_CURRENT        0x33
+#define OP_SET_INJECT_MAX_CURRENT           0x34
+#define OP_SET_ROTATE_STALL_CHECK_ENABLE    0x41
+#define OP_SET_DRIVE_ON_STALL_CHECK_ENABLE  0x42
+#define OP_SET_DRIVE_OFF_STALL_CHECK_ENABLE 0x43
+#define OP_SET_INJECT_STALL_CHECK_ENABLE    0x44
 
 std::auto_ptr<Serial> serialPort;
 
-ros::Time timestamp;
-uint8_t opCode;
-uint8_t opCodeOfLastAction;
-uint8_t remainingInjections = 0;
-bool calibrated = false;
-bool hatchOpen = false;
-bool wheelInPosition = false;
-bool driverForward = false;
-bool driverBack = false;
-bool fireDanger = false;
-bool criticalFireDanger = false;
-bool rotateMotorOn = false;
-bool driveMotorOn = false;
-bool injectMotorOn = false;
-bool hatchFailure = false;
-bool wheelFailure = false;
-bool driverFailure = false;
-bool injectorFailure = false;
-uint32_t batteryVoltage;
-uint32_t actionStartTime;
-uint32_t actionDuration;
-uint32_t counterStartVal;
-uint32_t counterEndVal;
-uint16_t instantaneousCurrent;
-uint16_t lowestCurrent;
-uint16_t highestCurrent;
-uint32_t totalCurrent;
+boost::mutex receivedMsgsMtx;
+const Packet* transmittedPacket = NULL;
+bool acked = false;
+ball_dropper::String global_stringMsg;
+ball_dropper::Configuration global_configurationMsg;
+ball_dropper::Heartbeat global_heartbeatMsg;
 
+boost::mutex operationMtx;
 ros::Publisher heartbeatPub;
-void publishHeartbeatMsg()
+ros::Publisher configurationPub;
+ros::Publisher stringMessagePub;
+
+void printStatus(ball_dropper::Heartbeat heartbeatMsg)
 {
-    ball_dropper_msgs::Heartbeat heartbeatMsg;
-
-    heartbeatMsg.header.stamp = timestamp;
-
-    heartbeatMsg.currentOpCode = opCode;
-    heartbeatMsg.opCodeOfLastAction = opCodeOfLastAction;
-    heartbeatMsg.remainingInjections = remainingInjections;
-    heartbeatMsg.calibrated = calibrated ? 1 : 0;
-    heartbeatMsg.hatchOpen = hatchOpen ? 1 : 0;
-    heartbeatMsg.wheelInPosition = wheelInPosition ? 1 : 0;
-    heartbeatMsg.driverForward = driverForward? 1 : 0;
-    heartbeatMsg.driverBack = driverBack ? 1 : 0;
-    heartbeatMsg.fireDanger = fireDanger ? 1 : 0;
-    heartbeatMsg.criticalFireDanger = criticalFireDanger ? 1 : 0;
-    heartbeatMsg.hatchFailure = hatchFailure ? 1 : 0;
-    heartbeatMsg.wheelFailure = wheelFailure ? 1 : 0;
-    heartbeatMsg.driverFailure = driverFailure ? 1 : 0;
-    heartbeatMsg.injectorFailure = injectorFailure ? 1 : 0;
-    heartbeatMsg.rotateMotorOn = rotateMotorOn ? 1 : 0;
-    heartbeatMsg.driveMotorOn = driveMotorOn ? 1 : 0;
-    heartbeatMsg.injectMotorOn = injectMotorOn ? 1 : 0;
-    heartbeatMsg.batteryVoltage = batteryVoltage;
-    heartbeatMsg.actionStartTime = actionStartTime;
-    heartbeatMsg.actionDuration = actionDuration;
-    heartbeatMsg.counterStartVal = counterStartVal;
-    heartbeatMsg.counterEndVal = counterEndVal;
-    heartbeatMsg.instantaneousCurrent = instantaneousCurrent;
-    heartbeatMsg.lowestCurrent = lowestCurrent;
-    heartbeatMsg.highestCurrent = highestCurrent;
-    heartbeatMsg.totalCurrent = totalCurrent;
-
-    heartbeatPub.publish(heartbeatMsg);
-}
-
-void printStatus()
-{
-    printf("\nOp Code: %u\n", opCode);
-    printf("\nOp Code of Last Action: %u\n", opCode);
-    printf("Remaining Injections: %d\n", remainingInjections);
-    calibrated ? printf("Calibrated\n") : printf("Uncalibrated\n");
-    if (hatchOpen) {
+    printf("\nOp Code: %u\n", heartbeatMsg.currentOpCode);
+    printf("\nOp Code of Last Action: %u\n", heartbeatMsg.opCodeOfLastAction);
+    printf("Remaining Injections: %d\n", heartbeatMsg.remainingInjections);
+    heartbeatMsg.calibrated ? printf("Calibrated\n") : printf("Uncalibrated\n");
+    if (heartbeatMsg.hatchOpen) {
         printf("Hatch Open\n");
     } else {
         printf("Hatch Closed\n");
     }
 
-    wheelInPosition ? printf("Wheel in Position\n") : printf("Wheel not in Position!\n");
+    heartbeatMsg.wheelInPosition ? printf("Wheel in Position\n") : printf("Wheel not in Position!\n");
 
-    if (driverForward) {
+    if (heartbeatMsg.driverForward) {
         printf("Driver Forward\n");
-    } else if (driverBack) {
+    } else if (heartbeatMsg.driverBack) {
         printf("Driver Back\n");
     } else {
         printf("Driver neither Forward nor Back!\n");
     }
 
-    if (criticalFireDanger)
+    if (heartbeatMsg.criticalFireDanger)
     {
         printf("System failure during injection! Critical Fire Danger!\n");
     }
-    else if (fireDanger)
+    else if (heartbeatMsg.fireDanger)
     {
         printf("Ball is going to be on fire.\n");
     }
 
-    if (hatchFailure) {
+    if (heartbeatMsg.hatchFailure) {
         printf("Hatch Failure!\n");
     }
-    if (wheelFailure) {
+    if (heartbeatMsg.wheelFailure) {
         printf("Wheel Failure!\n");
     }
-    if (driverFailure) {
+    if (heartbeatMsg.driverFailure) {
         printf("Driver Failure!\n");
     }
-    if (injectorFailure) {
+    if (heartbeatMsg.injectorFailure) {
         printf("Injector Failure!\n");
     }
-    printf("Action Start Time: %u\n", actionStartTime);
-    printf("Action Duration: %u\n", actionDuration);
-    printf("Counter Start Val: %u\n", counterStartVal);
-    printf("Counter End Val: %u\n", counterEndVal);
-    printf("Lowest Current: %u\n", lowestCurrent);
-    printf("Highest Current: %u\n", highestCurrent);
-    printf("Total Current: %u\n", totalCurrent);
-}
-
-/*
- * @brief Dissects a status packet received from the ball dropper over the serial comms.
- */
-void parseHeartbeatPacket(const uint8_t* data)
-{
-    int offset = 0;
-    uint8_t flags;
-
-    timestamp = ros::Time::now();
-
-    opCode = data[offset];
-    ++offset;
-
-    opCodeOfLastAction = data[offset];
-    ++offset;
-
-    remainingInjections = data[offset];
-    ++offset;
-
-    flags = data[offset];
-    calibrated = flags & 0x01 ? true : false;
-    hatchOpen  = flags & 0x02 ? true : false;
-    wheelInPosition = flags & 0x04 ? true : false;
-    driverForward = flags & 0x08 ? true : false;
-    driverBack = flags & 0x10 ? true : false;
-    fireDanger = flags & 0x20 ? true : false;
-    criticalFireDanger = flags & 0x40 ? true : false;
-    ++offset;
-
-    flags = data[offset];
-    hatchFailure = flags & 0x01 ? true : false;
-    wheelFailure = flags & 0x02 ? true : false;
-    driverFailure = flags & 0x04 ? true : false;
-    injectorFailure = flags & 0x08 ? true : false;
-    rotateMotorOn = flags & 0x10 ? true : false;
-    driveMotorOn = flags & 0x20 ? true : false;
-    injectMotorOn = flags & 0x40 ? true : false;
-    ++offset;
-
-    batteryVoltage = readUint32(data,offset);
-    offset+=4;
-
-    actionStartTime = readUint32(data,offset);
-    offset+=4;
-
-    actionDuration = readUint32(data,offset);
-    offset+=4;
-
-    counterStartVal = readUint32(data,offset);
-    offset+=4;
-
-    counterEndVal = readUint32(data,offset);
-    offset+=4;
-
-    instantaneousCurrent = readUint16(data,offset);
-    offset+=2;
-
-    lowestCurrent = readUint16(data,offset);
-    offset+=2;
-
-    highestCurrent = readUint16(data,offset);
-    offset+=2;
-
-    totalCurrent = readUint32(data,offset);
-    offset+=4;
-
-    publishHeartbeatMsg();
+    printf("Action Start Time: %u\n", heartbeatMsg.actionStartTime);
+    printf("Action Duration: %u\n", heartbeatMsg.actionDuration);
+    printf("Counter Start Val: %u\n", heartbeatMsg.counterStartVal);
+    printf("Counter End Val: %u\n", heartbeatMsg.counterEndVal);
+    printf("Lowest Current: %u\n", heartbeatMsg.lowestCurrent);
+    printf("Highest Current: %u\n", heartbeatMsg.highestCurrent);
+    printf("Total Current: %u\n", heartbeatMsg.totalCurrent);
     return;
 }
 
 
-//Transmit any string recieved to the ball dropper
-void consoleCallback(const std_msgs::String& msg)
-{
-    if ( msg.data.length() < 255 )
-    {
-        transmitStringPacket(msg.data.c_str(), serialPort.get());
-    }
-}
-
-const Packet* transmittedPacket = NULL;
-bool acked = false;
-bool expectingErrorString = false;
-char errorString[256];
-boost::mutex operationMtx;
 
 /*
  * Commands the ball dropper to perform the requested operation
@@ -248,22 +138,20 @@ bool operation(ball_dropper::Operation::Request &req,
     //Will be unlocked when the function returns and this object is destroyed
     boost::interprocess::scoped_lock<boost::mutex> slock(operationMtx);
 
-    //Get the previous operation code and its start time
-    uint8_t previousOpCode = opCodeOfLastAction;
-    uint32_t previousActionStartTime = actionStartTime;
+    //Initialize the result
+    res.communicationFailure = true;
 
-    //Are we looking for an error string?
-    if (req.opCode == OP_GET_ERROR_STRING)
-    {
-        errorString[0] = '\0';
-        expectingErrorString = true;
-    }
+    //Get the previous operation start time
+    receivedMsgsMtx.lock();
+    uint32_t previousActionStartTime = global_heartbeatMsg.actionStartTime;
+    receivedMsgsMtx.unlock();
 
     bool success = false;
     //For each available attempt
     for (int attemptCount = 0; attemptCount < 1; ++attemptCount)
     {
         //Transmit the packet
+        acked = false;
         if (attemptCount == 0)
         {
             transmittedPacket = transmitPacket(&(req.opCode), 1, serialPort.get());
@@ -272,75 +160,341 @@ bool operation(ball_dropper::Operation::Request &req,
         {
             transmittedPacket = retryTransmission(serialPort.get());
         }
-        
-        acked = false;
-
-        //printf("Transmitted SeqID: %u, CRC16: %u\n", transmittedPacket->sequenceId, transmittedPacket->crc16);
 
         //Wait for timeout, acknowledgement, or infer communication success from the heartbeat
         ros::Time startWaitTime = ros::Time::now();
         ros::Duration waitTime;
         while (waitTime = ros::Time::now() - startWaitTime, waitTime.toSec() < 0.75)
         {
-            if (acked) {
-                success = true;
-                break;
-            }
-            if (previousActionStartTime != actionStartTime && opCodeOfLastAction == req.opCode)
+            receivedMsgsMtx.lock();
+            uint32_t currentActionStartTime = global_heartbeatMsg.actionStartTime;
+            uint8_t currentlastActionOpCode = global_heartbeatMsg.opCodeOfLastAction;
+            receivedMsgsMtx.unlock();
+            if ( acked ||
+                previousActionStartTime != currentActionStartTime && currentlastActionOpCode == req.opCode)
             {
                 success = true;
-                break;
+                res.communicationFailure = false;
+                //Return
+                acked = true;
+                return true;
             }
         }
-        //Did we succeed? 
-        if (success)
-        {
-            //Don't retry
-            break;
-        }
-    }
-    //Did we get a response?
-    if (success)
-    {
-        //Were we looking for an error string?
-        if (req.opCode == OP_GET_ERROR_STRING)
-        {
-            //Wait for the error string packet to arrive
-            ros::Time startWaitTime = ros::Time::now();
-            ros::Duration waitTime;
-            while (expectingErrorString)
-            {
-                waitTime = ros::Time::now() - startWaitTime;
-                if (waitTime.toSec() > 1.0)
-                {
-                    break;
-                }
-            }
-            //Did we receive it?
-            if (expectingErrorString)
-            {
-                //Successfully transmitted the operation command, but didn't get the error string packet back
-                res.errorMessage = "Communication Failure";
-            }
-            else
-            {
-                //Successfully transmitted the operation command, and got the error string packet back
-                res.errorMessage = std::string(errorString);
-            }
-        } else {
-            //Successfully transmitted the operation command
-            res.errorMessage = "";
-        }
-    }
-    else
-    {
-        //Unsuccessfully transmitted the operation command
-        res.errorMessage = "Communication Failure";
+        acked = true;
     }
     //Return
-    expectingErrorString = false;
-    acked = true;
     return true;
+}
+
+bool getErrorString(ball_dropper::GetErrorString::Request &req,
+                    ball_dropper::GetErrorString::Response &res)
+{
+    //Lock the mutex so that we don't try concurrent operations
+    //Will be unlocked when the function returns and this object is destroyed
+    boost::interprocess::scoped_lock<boost::mutex> slock(operationMtx);
+
+    //Initialize the result
+    res.communicationFailure = true;
+    res.errorStr = std::string("");
+
+    //Get the time of the previous string message
+    receivedMsgsMtx.lock();
+    ros::Time timeOfPreviousMessage = global_stringMsg.header.stamp;
+    receivedMsgsMtx.unlock();
+
+    //The message to transmit
+    uint8_t opCode = OP_GET_ERROR_STRING;
+
+    //For each available attempt
+    for (int attemptCount = 0; attemptCount < 1; ++attemptCount)
+    {
+        //Transmit the packet
+        if (attemptCount == 0)
+        {
+            transmittedPacket = transmitPacket(&opCode, 1, serialPort.get());
+        }
+        else
+        {
+            transmittedPacket = retryTransmission(serialPort.get());
+        }
+
+        //Wait for a string to be received
+        ros::Time startWaitTime = ros::Time::now();
+        ros::Duration waitTime;
+        while (waitTime = ros::Time::now() - startWaitTime, waitTime.toSec() < 1.0)
+        {
+            receivedMsgsMtx.lock();
+            ros::Time timeOfCurrentMessage = global_stringMsg.header.stamp;
+            receivedMsgsMtx.unlock();
+            if (timeOfCurrentMessage.toSec() != timeOfPreviousMessage.toSec()) {
+                res.communicationFailure = false;
+                res.errorStr = global_stringMsg.str;
+                return true;
+            }
+        }
+    }
+    return true;
+}
+
+/*
+ * Commands the ball dropper to set the requested variable
+ */
+bool configure(ball_dropper::Configure::Request &req,
+                ball_dropper::Configure::Response &res)
+{
+    //Lock the mutex so that we don't try concurrent operations
+    //Will be unlocked when the function returns and this object is destroyed
+    boost::interprocess::scoped_lock<boost::mutex> slock(operationMtx);
+
+    //Initialize the result
+    res.communicationFailure = true;
+
+    uint8_t data[6];
+    data[0] = OP_SET;
+    data[1] = req.varCode;
+    writeUint32(data,2,req.val);
+
+    //For each available attempt
+    for (int attemptCount = 0; attemptCount < 1; ++attemptCount)
+    {
+        //Transmit the packet
+        acked = false;
+        if (attemptCount == 0)
+        {
+            transmittedPacket = transmitPacket(data, 6, serialPort.get());
+        }
+        else
+        {
+            transmittedPacket = retryTransmission(serialPort.get());
+        }
+
+        //Wait for timeout or acknowledgement
+        ros::Time startWaitTime = ros::Time::now();
+        ros::Duration waitTime;
+        while (waitTime = ros::Time::now() - startWaitTime, waitTime.toSec() < 0.75)
+        {
+            if (acked) {
+                res.communicationFailure = false;
+                return true;
+            }
+        }
+        acked = true;
+    }
+    //Return
+    return true;
+}
+
+bool getConfiguration(ball_dropper::GetConfiguration::Request &req,
+                      ball_dropper::GetConfiguration::Response &res)
+{
+    //Lock the mutex so that we don't try concurrent operations
+    //Will be unlocked when the function returns and this object is destroyed
+    boost::interprocess::scoped_lock<boost::mutex> slock(operationMtx);
+    
+    //Initialize the result
+    res.communicationFailure = true;
+    res.rotateCounter = 0;
+    res.driveCounter = 0;
+    res.injectCounter = 0;
+    res.rotateThresh = 0;
+    res.driveOnThresh = 0;
+    res.driveOffThresh = 0;
+    res.injectThresh = 0;
+    res.rotateTimeout = 0;
+    res.driveOnTimeout = 0;
+    res.driveOffTimeout = 0;
+    res.injectTimeout = 0;
+    res.rotateMaxCurrent = 0;
+    res.driveOnMaxCurrent = 0;
+    res.driveOffMaxCurrent = 0;
+    res.injectMaxCurrent = 0;
+    res.rotateStallCheckEnable = 0;
+    res.driveOnStallCheckEnable = 0;
+    res.driveOffStallCheckEnable = 0;
+    res.injectStallCheckEnable = 0;
+
+    //Get the time of the previous configuration message
+    receivedMsgsMtx.lock();
+    ros::Time timeOfPreviousMessage = global_configurationMsg.header.stamp;
+    receivedMsgsMtx.unlock();
+
+    //The message to transmit
+    uint8_t opCode = OP_GET_CONFIGURATION;
+
+    //For each available attempt
+    for (int attemptCount = 0; attemptCount < 1; ++attemptCount)
+    {
+        //Transmit the packet
+        if (attemptCount == 0)
+        {
+            transmittedPacket = transmitPacket(&opCode, 1, serialPort.get());
+        }
+        else
+        {
+            transmittedPacket = retryTransmission(serialPort.get());
+        }
+
+        //Wait for a configuration to be received
+        ros::Time startWaitTime = ros::Time::now();
+        ros::Duration waitTime;
+        while (waitTime = ros::Time::now() - startWaitTime, waitTime.toSec() < 1.0)
+        {
+            receivedMsgsMtx.lock();
+            ros::Time timeOfCurrentMessage = global_configurationMsg.header.stamp;
+            receivedMsgsMtx.unlock();
+            if (timeOfCurrentMessage.toSec() != timeOfPreviousMessage.toSec())
+            {
+                res.communicationFailure = false;
+                res.rotateCounter = global_configurationMsg.rotateCounter;
+                res.driveCounter = global_configurationMsg.driveCounter;
+                res.injectCounter = global_configurationMsg.injectCounter;
+                res.rotateThresh = global_configurationMsg.rotateThresh;
+                res.driveOnThresh = global_configurationMsg.driveOnThresh;
+                res.driveOffThresh = global_configurationMsg.driveOffThresh;
+                res.injectThresh = global_configurationMsg.injectThresh;
+                res.rotateTimeout = global_configurationMsg.rotateTimeout;
+                res.driveOnTimeout = global_configurationMsg.driveOnTimeout;
+                res.driveOffTimeout = global_configurationMsg.driveOffTimeout;
+                res.injectTimeout = global_configurationMsg.injectTimeout;
+                res.rotateMaxCurrent = global_configurationMsg.rotateMaxCurrent;
+                res.driveOnMaxCurrent = global_configurationMsg.driveOnMaxCurrent;
+                res.driveOffMaxCurrent = global_configurationMsg.driveOffMaxCurrent;
+                res.injectMaxCurrent = global_configurationMsg.injectMaxCurrent;
+                res.rotateStallCheckEnable = global_configurationMsg.rotateStallCheckEnable;
+                res.driveOnStallCheckEnable = global_configurationMsg.driveOnStallCheckEnable;
+                res.driveOffStallCheckEnable = global_configurationMsg.driveOffStallCheckEnable;
+                res.injectStallCheckEnable = global_configurationMsg.injectStallCheckEnable;
+                return true;
+            }
+        }
+    }
+    return true;
+}
+
+/*
+ * @brief Dissects a configuration packet received from the ball dropper over the serial comms.
+ */
+ball_dropper::Configuration parseConfigurationPacket(const uint8_t* data)
+{
+    ball_dropper::Configuration configurationMsg;
+    int offset = 0;
+
+    configurationMsg.header.stamp = ros::Time::now();
+
+    configurationMsg.rotateCounter = readUint32(data, offset);
+    offset+=4;
+    configurationMsg.driveCounter = readUint32(data, offset);
+    offset+=4;
+    configurationMsg.injectCounter = readUint32(data, offset);
+    offset+=4;
+
+    configurationMsg.rotateThresh = readUint32(data, offset);
+    offset+=4;
+    configurationMsg.driveOnThresh = readUint32(data, offset);
+    offset+=4;
+    configurationMsg.driveOffThresh = readUint32(data, offset);
+    offset+=4;
+    configurationMsg.injectThresh = readUint32(data, offset);
+    offset+=4;
+
+    configurationMsg.rotateTimeout = readUint16(data, offset);
+    offset+=2;
+    configurationMsg.driveOnTimeout = readUint16(data, offset);
+    offset+=2;
+    configurationMsg.driveOffTimeout = readUint16(data, offset);
+    offset+=2;
+    configurationMsg.injectTimeout = readUint16(data, offset);
+    offset+=2;
+
+    configurationMsg.rotateMaxCurrent = readUint16(data, offset);
+    offset+=2;
+    configurationMsg.driveOnMaxCurrent = readUint16(data, offset);
+    offset+=2;
+    configurationMsg.driveOffMaxCurrent = readUint16(data, offset);
+    offset+=2;
+    configurationMsg.injectMaxCurrent = readUint16(data, offset);
+    offset+=2;
+
+    configurationMsg.rotateStallCheckEnable = (data[offset] & 0x01);
+    configurationMsg.driveOnStallCheckEnable = (data[offset] & 0x02) >> 1;
+    configurationMsg.driveOffStallCheckEnable = (data[offset] & 0x04) >> 2;
+    configurationMsg.injectStallCheckEnable = (data[offset] & 0x08) >> 3;
+    offset+=1;
+    
+    return configurationMsg;
+}
+
+ball_dropper::String parseStringPacket(const uint8_t* data)
+{
+    ball_dropper::String stringMsg;
+    stringMsg.header.stamp = ros::Time::now();
+    stringMsg.str = std::string((char*)data);
+    return stringMsg;
+}
+
+ball_dropper::Heartbeat parseHeartbeatPacket( const uint8_t* data)
+{
+    ball_dropper::Heartbeat heartbeatMsg;
+    int offset = 0;
+    uint8_t flags = 0;
+
+    heartbeatMsg.header.stamp = ros::Time::now();
+
+    heartbeatMsg.currentOpCode = data[offset];
+    ++offset;
+
+    heartbeatMsg.opCodeOfLastAction = data[offset];
+    ++offset;
+
+    heartbeatMsg.remainingInjections = data[offset];
+    ++offset;
+
+    heartbeatMsg.calibrated = (data[offset] & 0x01);
+    heartbeatMsg.hatchOpen  = (data[offset] & 0x02) >> 1;
+    heartbeatMsg.wheelInPosition = (data[offset] & 0x04) >> 2;
+    heartbeatMsg.driverForward = (data[offset] & 0x08) >> 3;
+    heartbeatMsg.driverBack = (data[offset] & 0x10) >> 4;
+    heartbeatMsg.fireDanger = (data[offset] & 0x20) >> 5;
+    heartbeatMsg.criticalFireDanger = (data[offset] & 0x40) >> 6;
+    ++offset;
+
+    heartbeatMsg.hatchFailure = (data[offset] & 0x01);
+    heartbeatMsg.wheelFailure = (data[offset] & 0x02) >> 1;
+    heartbeatMsg.driverFailure = (data[offset] & 0x04) >> 2;
+    heartbeatMsg.injectorFailure = (data[offset] & 0x08) >> 3;
+    heartbeatMsg.rotateMotorOn = (data[offset] & 0x10) >> 4;
+    heartbeatMsg.driveMotorOn = (data[offset] & 0x20) >> 5;
+    heartbeatMsg.injectMotorOn = (data[offset] & 0x40) >> 6;
+    ++offset;
+
+    heartbeatMsg.batteryVoltage = readUint32(data,offset);
+    offset+=4;
+
+    heartbeatMsg.actionStartTime = readUint32(data,offset);
+    offset+=4;
+
+    heartbeatMsg.actionDuration = readUint32(data,offset);
+    offset+=4;
+
+    heartbeatMsg.counterStartVal = readUint32(data,offset);
+    offset+=4;
+
+    heartbeatMsg.counterEndVal = readUint32(data,offset);
+    offset+=4;
+
+    heartbeatMsg.instantaneousCurrent = readUint16(data,offset);
+    offset+=2;
+
+    heartbeatMsg.lowestCurrent = readUint16(data,offset);
+    offset+=2;
+
+    heartbeatMsg.highestCurrent = readUint16(data,offset);
+    offset+=2;
+
+    heartbeatMsg.totalCurrent = readUint32(data,offset);
+    offset+=4;
+
+    return heartbeatMsg;
 }
 
 void listenerThread(void)
@@ -360,6 +514,7 @@ void listenerThread(void)
         {
             if ( !isAck(receivedPkt) )
             {
+                receivedMsgsMtx.lock();
                 ++numReceivedPackets;
                 //Check if we've lost any packets
                 if (expectedSequenceNum != -1)
@@ -380,21 +535,17 @@ void listenerThread(void)
                 //Is this a string packet?
                 if (receivedPkt->data[receivedPkt->dataLength - 1] == '\0')
                 {
-                    //printf("String Packet Received: %s\n", receivedPkt->data);
-                    //Are we looking for an error string packet?
-                    if (expectingErrorString)
-                    {
-                        strcpy(errorString, (const char*)receivedPkt->data);
-                        acked = true;
-                        expectingErrorString = false;
-                    }
+                    global_stringMsg = parseStringPacket(receivedPkt->data);
+                    stringMessagePub.publish(global_stringMsg);
                 }
                 //Is this a heartbeat packet?
                 else if (receivedPkt->dataLength == 36)
                 {
+                    global_heartbeatMsg = parseHeartbeatPacket(receivedPkt->data);
+                    heartbeatPub.publish(global_heartbeatMsg);
                     //Heartbeat packet
                     //printf("Heartbeat Packet Received\n");
-                    parseHeartbeatPacket(receivedPkt->data);
+                    //parseHeartbeatPacket(receivedPkt->data);
 
                     double timeSinceLastHeartbeat = (ros::Time::now() - timeOfLastHeartbeat).toSec();
 
@@ -407,11 +558,17 @@ void listenerThread(void)
                     //std::cout << (ros::Time::now() - timeOfLastHeartbeat).toSec() << std::endl;
                     timeOfLastHeartbeat = ros::Time::now();
                 }
+                else if (receivedPkt->dataLength == 46)
+                {
+                    global_configurationMsg = parseConfigurationPacket(receivedPkt->data);
+                    configurationPub.publish(global_configurationMsg);
+                }
                 //This must be some unrecognized binary data packet.
                 else
                 {
-                    //printf("Data Packet Received\n");
+                    printf("Unknown packet type received. Length = %u\n", receivedPkt->dataLength);
                 }
+                receivedMsgsMtx.unlock();
             }
             else
             {
@@ -434,17 +591,28 @@ int main(int argc, char **argv)
     ros::init(argc, argv, "ball_dropper_node");
     ros::NodeHandle n;
 
-    setMaxAllowedDataLength(36);
+    setMaxAllowedDataLength(46);
 
-    serialPort.reset(new Serial("/dev/ttyUSB0", 9600));
+    std::string serialDevice;
+    int baud;
 
-    heartbeatPub = n.advertise<ball_dropper_msgs::Heartbeat>("heartbeat", 100);
-    ros::Subscriber consoleSub = n.subscribe("ballDropperMsg", 10, consoleCallback);
+    //Get the name of the serial device to open
+    n.param<std::string>("/" + ros::this_node::getName() + "/serialDevice", serialDevice, "/dev/ttyUSB0");
+    n.param<int>("/" + ros::this_node::getName() + "/baud", baud, 9600);
+
+    serialPort.reset(new Serial(serialDevice, baud));
+
+    heartbeatPub = n.advertise<ball_dropper::Heartbeat>("heartbeat", 100);
+    configurationPub = n.advertise<ball_dropper::Configuration>("configuration", 100);
+    stringMessagePub = n.advertise<ball_dropper::String>("stringMessages", 100);
     ros::ServiceServer operationService = n.advertiseService("operation", operation);
+    ros::ServiceServer getConfigurationService = n.advertiseService("getConfiguration", getConfiguration);
+    ros::ServiceServer getErrorStringService = n.advertiseService("getErrorString", getErrorString);
+    ros::ServiceServer configureService = n.advertiseService("configure", configure);
 
     std::auto_ptr<boost::thread> pListenerThread;
     //Create a new thread to listen on the serial port.
-    pListenerThread.reset( new  boost::thread(listenerThread));
+    pListenerThread.reset( new boost::thread(listenerThread));
 
     //Handle subscriber and service server callbacks in this thread
     ros::spin(); 
