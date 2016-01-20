@@ -202,17 +202,17 @@ class BallDropperGUI(Frame):
 
 		self.dCounter = IntVar()
 		self.dCounterButton = Button(self.counterFrame, text="Driver", command=self.setDCounter, width=buttonWidth).grid(row=row, column=0, padx=padx, pady=pady, sticky="W")
-		self.dCounterVal = Entry(self.counterFrame, textvariable=self.dCounter, width=width).grid(row=row, column=1, padx=padx, pady=pady, sticky="E")
+		self.dCounterVal = Entry(self.counterFrame, textvariable=self.dCounter, width=width).grid(row=row, column=1, padx=padx, pady=pady, sticky="E", columnspan=2)
 		row += 1
 
 		self.rCounter = IntVar()
 		self.dCounterButton = Button(self.counterFrame, text="Rotator", command=self.setRCounter, width=buttonWidth).grid(row=row, column=0, padx=padx, pady=pady, sticky="W")
-		self.dCounterVal = Entry(self.counterFrame, textvariable=self.rCounter, width=width).grid(row=row, column=1, padx=padx, pady=pady, sticky="E")
+		self.dCounterVal = Entry(self.counterFrame, textvariable=self.rCounter, width=width).grid(row=row, column=1, padx=padx, pady=pady, sticky="E", columnspan=2)
 		row += 1
 
 		self.iCounter = IntVar()
 		self.iCounterButton = Button(self.counterFrame, text="Injector", command=self.setICounter, width=buttonWidth).grid(row=row, column=0, padx=padx, pady=pady, sticky="W")
-		self.iCounterVal = Entry(self.counterFrame, textvariable=self.iCounter, width=width).grid(row=row, column=1, padx=padx, pady=pady, sticky="E")
+		self.iCounterVal = Entry(self.counterFrame, textvariable=self.iCounter, width=width).grid(row=row, column=1, padx=padx, pady=pady, sticky="E", columnspan=2)
 		row += 1
 
 		#Thresholds
@@ -223,19 +223,21 @@ class BallDropperGUI(Frame):
 		self.threshLabel = Label(self.threshFrame, font=("TkDefaultFont", fontSize), text="Threshold Operations:").grid(row=row, column=0, padx=padx, pady=pady, sticky="W", columnspan=2)
 		row += 1
 
-		self.dThresh = IntVar()
+		self.dLowThresh = IntVar()
+		self.dHighThresh = IntVar()
 		self.dThreshButton = Button(self.threshFrame, text="Driver", command=self.setDThresh, width=buttonWidth).grid(row=row, column=0, padx=padx, pady=pady, sticky="W")
-		self.dThreshVal = Entry(self.threshFrame, textvariable=self.dThresh, width=width).grid(row=row, column=1, padx=padx, pady=pady, sticky="E")
+		self.dLowThreshVal = Entry(self.threshFrame, textvariable=self.dLowThresh, width=width/2).grid(row=row, column=1, padx=(padx, 0), pady=pady, sticky="W")
+		self.dHighThreshVal = Entry(self.threshFrame, textvariable=self.dHighThresh, width=width/2).grid(row=row, column=2, padx=(0, padx), pady=pady, sticky="E")
 		row += 1
 
 		self.rThresh = IntVar()
 		self.rThreshButton = Button(self.threshFrame, text="Rotator", command=self.setRThresh, width=buttonWidth).grid(row=row, column=0, padx=padx, pady=pady, sticky="W")
-		self.rThreshVal = Entry(self.threshFrame, textvariable=self.rThresh, width=width).grid(row=row, column=1, padx=padx, pady=pady, sticky="E")
+		self.rThreshVal = Entry(self.threshFrame, textvariable=self.rThresh, width=width).grid(row=row, column=1, padx=padx, pady=pady, sticky="E", columnspan=2)
 		row += 1
 
 		self.iThresh = IntVar()
 		self.iThreshButton = Button(self.threshFrame, text="Injector", command=self.setIThresh, width=buttonWidth).grid(row=row, column=0, padx=padx, pady=pady, sticky="W")
-		self.iThreshVal = Entry(self.threshFrame, textvariable=self.iThresh, width=width).grid(row=row, column=1, padx=padx, pady=pady, sticky="E")
+		self.iThreshVal = Entry(self.threshFrame, textvariable=self.iThresh, width=width).grid(row=row, column=1, padx=padx, pady=pady, sticky="E", columnspan=2)
 		row += 1
 
 #Remaining Supplies Column
@@ -516,6 +518,7 @@ class BallDropperGUI(Frame):
 	#Heartbeat Frame
 		self.currOp.set(self.opLookup(heartbeat.currentOpCode))
 		self.lastOp.set(self.opLookup(heartbeat.opCodeOfLastAction))
+		self.lastOpNum = heartbeat.opCodeOfLastAction
 		if heartbeat.calibrated:
 			self.calibratedVal.config(text="Yes", foreground="green")
 		else:
@@ -628,7 +631,11 @@ class BallDropperGUI(Frame):
 	def op_timer_callback(self, event):
 		if not self.opQueue.empty() and self.idle:
 			self.idle = 0
-			operation_client(self.opQueue.get())
+			nextOp = self.opQueue.get()
+			print(self.lastOpNum)
+			if nextOp == 3 and self.ballInPosition:
+				self.remainingBalls -= 1
+			operation_client(nextOp)
 
 	def setDCounter(self):
 		print("Counter Set: %s"%str(self.dCounter.get()))
@@ -640,7 +647,8 @@ class BallDropperGUI(Frame):
 		print("Counter Set: %s"%str(self.iCounter.get()))
 
 	def setDThresh(self):
-		print("Threshold Set: %s"%str(self.dThresh.get()))
+		print("Low Threshold Set: %s"%str(self.dLowThresh.get()))
+		print("High Threshold Set: %s"%str(self.dHighThresh.get()))
 
 	def setRThresh(self):
 		print("Threshold Set: %s"%str(self.rThresh.get()))
