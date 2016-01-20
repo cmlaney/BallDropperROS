@@ -8,6 +8,7 @@ uint32 rotateThresh
 uint32 driveOnThresh
 uint32 driveOffThresh
 uint32 injectThresh
+uint32 injectMaxThresh
 
 uint16 rotateTimeout
 uint16 driveOnTimeout

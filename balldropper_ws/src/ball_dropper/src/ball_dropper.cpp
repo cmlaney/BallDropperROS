@@ -46,6 +46,7 @@
 #define OP_SET_DRIVE_ON_THRESHOLD           0x12
 #define OP_SET_DRIVE_OFF_THRESHOLD          0x13
 #define OP_SET_INJECT_THRESHOLD             0x14
+#define OP_SET_INJECT_MAX_THRESHOLD         0x15
 #define OP_SET_ROTATE_TIMEOUT               0x21
 #define OP_SET_DRIVE_ON_TIMEOUT             0x22
 #define OP_SET_DRIVE_OFF_TIMEOUT            0x23
@@ -300,6 +301,7 @@ bool getConfiguration(ball_dropper::GetConfiguration::Request &req,
     res.driveOnThresh = 0;
     res.driveOffThresh = 0;
     res.injectThresh = 0;
+    res.injectMaxThresh = 0;
     res.rotateTimeout = 0;
     res.driveOnTimeout = 0;
     res.driveOffTimeout = 0;
@@ -352,6 +354,7 @@ bool getConfiguration(ball_dropper::GetConfiguration::Request &req,
                 res.driveOnThresh = global_configurationMsg.driveOnThresh;
                 res.driveOffThresh = global_configurationMsg.driveOffThresh;
                 res.injectThresh = global_configurationMsg.injectThresh;
+                res.injectMaxThresh = global_configurationMsg.injectMaxThresh;
                 res.rotateTimeout = global_configurationMsg.rotateTimeout;
                 res.driveOnTimeout = global_configurationMsg.driveOnTimeout;
                 res.driveOffTimeout = global_configurationMsg.driveOffTimeout;
@@ -395,6 +398,8 @@ ball_dropper::Configuration parseConfigurationPacket(const uint8_t* data)
     configurationMsg.driveOffThresh = readUint32(data, offset);
     offset+=4;
     configurationMsg.injectThresh = readUint32(data, offset);
+    offset+=4;
+    configurationMsg.injectMaxThresh = readUint32(data, offset);
     offset+=4;
 
     configurationMsg.rotateTimeout = readUint16(data, offset);
@@ -558,7 +563,7 @@ void listenerThread(void)
                     //std::cout << (ros::Time::now() - timeOfLastHeartbeat).toSec() << std::endl;
                     timeOfLastHeartbeat = ros::Time::now();
                 }
-                else if (receivedPkt->dataLength == 46)
+                else if (receivedPkt->dataLength == 50)
                 {
                     global_configurationMsg = parseConfigurationPacket(receivedPkt->data);
                     configurationPub.publish(global_configurationMsg);
@@ -591,7 +596,7 @@ int main(int argc, char **argv)
     ros::init(argc, argv, "ball_dropper_node");
     ros::NodeHandle n;
 
-    setMaxAllowedDataLength(46);
+    setMaxAllowedDataLength(50);
 
     std::string serialDevice;
     int baud;
